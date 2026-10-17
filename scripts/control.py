@@ -12,7 +12,7 @@ import time
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host-config', default=str(Path(__file__).resolve().parents[1] / 'config/control-host.json'))
-    p.add_argument('command', help='team.py command, shell, or result COMMAND_ID')
+    p.add_argument('command', help='team.py command, target TARGET_ARGUMENTS, shell, or result COMMAND_ID')
     p.add_argument('arguments', nargs=argparse.REMAINDER)
     args = p.parse_args()
     try:
@@ -32,12 +32,15 @@ def main():
                 raise ValueError('result requires the previous SSM Command ID')
             command_id = args.arguments[0]
         else:
+            script = 'target.py' if args.command == 'target' else 'team.py'
+            forwarded = args.arguments if args.command == 'target' else [args.command, *args.arguments]
             command = shlex.join(['runuser', '-u', 'isucon', '--', 'python3',
-                                  '/srv/isucon/repo/scripts/team.py', '--db',
-                                  '/srv/isucon/state/team.sqlite3', args.command, *args.arguments])
+                                  '/srv/isucon/repo/scripts/' + script, '--db',
+                                  '/srv/isucon/state/team.sqlite3', *forwarded])
             response = aws('ssm', 'send-command', '--document-name', 'AWS-RunShellScript',
                            '--instance-ids', config['instance_id'], '--timeout-seconds', '60',
-                           '--parameters', json.dumps({'commands': [command], 'executionTimeout': ['60']}))
+                           '--parameters', json.dumps({'commands': [command], 'executionTimeout':
+                                                        ['1800' if args.command == 'target' else '60']}))
             command_id = response['Command']['CommandId']
             print('SSM Command ID: ' + command_id, file=sys.stderr, flush=True)
         for _ in range(60):

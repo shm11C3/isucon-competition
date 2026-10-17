@@ -48,6 +48,8 @@ a-codex-01として参加してください。最新の共有状態と観測を�
 
 通常の台帳操作は `scripts/control.py` がSSM Run Commandを使うため、Session Manager pluginは不要です。対話シェルにはAWS CLIのSession Manager pluginが必要です。AWSコンソールのSession Managerからも接続できます。
 
+対象操作も `python3 scripts/control.py target --agent SESSION --token TOKEN ACTION ...` で呼べます。Gitの取り込みやpreset作成は共通ホスト内で行います。エージェントから非対話で操作する場合は、AWS CLIの `ssm send-command --document-name AWS-RunShellScript` で `runuser -u isucon -- ...` を実行し、Command IDを保存して結果を確認します。環境占有を取得し、当日の運用規約に従ってください。
+
 ```bash
 python3 scripts/control.py shell
 # 接続後

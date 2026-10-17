@@ -53,6 +53,14 @@ python3 scripts/control.py env-acquire --agent b-claude-01 --purpose 'T-0001の�
 
 統合担当は共通ホストの `/srv/isucon/repo` で最新mainから候補を作り、提出コミットを取り込みます。kaizenの実験manifestに観測根拠と変更範囲を設定し、競技環境を変える操作は `scripts/target.py` から行います。ラッパーは対象未設定なら拒否します。
 
+各PCからも `control.py target` を使って同じラッパーを呼べます。対話シェル用のSession Manager pluginは不要です。
+
+```bash
+python3 scripts/control.py target --agent b-claude-01 --token TOKEN deploy FULL_CANDIDATE_SHA
+```
+
+長い処理ではCommand IDが返り、クライアントの待機が先に終了する場合があります。`python3 scripts/control.py result COMMAND_ID`で結果を再取得します。待機の終了を処理失敗とみなして同じ操作を重ねてはいけません。
+
 ```bash
 # 共通ホスト上で実行。初期状態では対象操作は無効。
 python3 scripts/target.py --agent b-claude-01 --token TOKEN deploy FULL_CANDIDATE_SHA
