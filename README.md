@@ -10,6 +10,7 @@
 - [当日の手順](docs/RUNBOOK.md)：開始・通常運用・終了・障害復旧
 - [参加者のセットアップ](docs/ONBOARDING.md)：Claude・Codex、AWS、共通ホスト
 - [インフラ](infra/README.md)：共通EC2の構築・接続・停止・再構築
+- [構築記録](infra/DEPLOYMENT.md)：作成済みEC2のID、設定、検証結果
 - [AGENTS.md](AGENTS.md)：両エージェント共通の規約。Claudeは `CLAUDE.md` から取り込みます
 
 ## 構成

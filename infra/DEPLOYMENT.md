@@ -28,6 +28,8 @@
 - 初回commit `3977fc2101066242e7f56cae864ca790a33d6250` をGitHubと共通ホストへ配置。
 - ローカルとEC2内で `python3 -m unittest discover -s tests -v` の6項目が成功。同時claim、永続占有とtoken更新、実行中の解放拒否、人間判断参照、対象未設定時の拒否、占有下の対象操作を確認。
 - EC2内のclone・plugin固定・テスト・台帳初期化のSSM Command ID: `b4dc18a9-a010-4858-b3a9-5c8bb9f2c7a0`（Success）。
+- 各PC用 `control.py` の実際のSSM経路で、占有取得、別担当の取得拒否、引き継ぎ、旧tokenの拒否、対象未設定時の拒否、解放を確認。最終状態は占有なし・タスクなし。
+- 共通ホストからGitHubへの `git push --dry-run origin main` が成功。ローカル・GitHub・共通ホストのmainを同期。
 - 既存の練習用EC2、既存Security Group、既存VPC経路は変更していない。
 
 ## 現在の対象設定
