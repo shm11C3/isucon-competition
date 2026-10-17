@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "plugin_root": "/srv/isucon/kaizen-plugin",
+  "project": "/srv/isucon/repo",
+  "confirmed_rules": false,
+  "confirmed_recovery_drill": false,
+  "note": "Copy to .local/target.json only after importing today's source, filling .kaizen/config.sh, and completing setup. Never put credentials here."
+}

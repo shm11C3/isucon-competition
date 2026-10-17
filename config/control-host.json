@@ -1,0 +1,13 @@
+{
+  "account_id": "521390384516",
+  "region": "ap-northeast-1",
+  "instance_id": "i-006f0637c33d1d766",
+  "instance_type": "t3.small",
+  "vpc_id": "vpc-0599aa584eabb7604",
+  "subnet_id": "subnet-031099c9c2353a28c",
+  "role_name": "isucon-competition-control-ssm",
+  "project": "isucon-competition",
+  "repository": "shm11C3/isucon-competition",
+  "access": "ssm",
+  "target_configured": false
+}

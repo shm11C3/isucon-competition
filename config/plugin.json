@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/shm11C3/kaizen-plugin.git",
+  "revision": "187200363e980f208b64040537e6357384604da3",
+  "controlHostPath": "/srv/isucon/kaizen-plugin",
+  "note": "Current single-experiment plugin. Only the integration owner operates its shared state."
+}
