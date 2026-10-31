@@ -131,7 +131,7 @@ async function main() {
       id = (await jobIds(page)).find((i) => i > last) ?? null;
     }
     if (!id) await mismatch(ctx, page, '依頼後に新しいジョブIDが現れない');
-    recorder.write('job_created', { job: id, status: 'WAITING' });
+    recorder.write('job_created', { job: id });
     let r;
     while (true) {
       r = await readJob(page, id);
@@ -141,7 +141,7 @@ async function main() {
     }
     recorder.write('result', r); out(r, label); await ctx.close(); process.exit(r.pass === true ? 0 : 1);
   }
-  die(2, 'usage: node portal-bench.mjs login | run [--label TEXT] | status [job]');
+  die(2, 'usage: node portal-bench.mjs login | run [--label TEXT] [--operator SESSION] [--source-sha FULL40] [--record PATH] | status [job]');
 }
 main().catch((e) => {
   die(2, `error: ${e.message}`);

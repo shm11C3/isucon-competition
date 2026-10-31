@@ -40,7 +40,6 @@ export function createRunRecorder(options, emit = console.error) {
       emit(line);
       try {
         fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-        try { fs.chmodSync(path.dirname(file), 0o700); } catch {}
         fs.appendFileSync(file, `${line}\n`, { mode: 0o600 });
         fs.chmodSync(file, 0o600);
       } catch (e) {
