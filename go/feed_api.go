@@ -48,7 +48,7 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusBadRequest, "invalid_pagination")
 		}
 		ctx := c.Request().Context()
-		viewer, err := loadViewerContext(ctx, h.DB, GetSession(c).UserID)
+		viewer, err := loadViewerContextWithGraph(ctx, h.DB, GetSession(c).UserID, input.Feed == "following" || ranked)
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.JSON(http.StatusOK, getFeedResponse{Items: []feedItemResponse{}})
 		}
@@ -92,23 +92,21 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		items := make([]feedItemResponse, 0)
+		hasMore := false
 		for _, post := range candidates {
 			score := scores[post.ID]
 			if ranked && input.BeforeScore != nil && !rankedBefore(score, post.Post, *input.BeforeScore, *input.BeforePostedAt, input.BeforeID) {
 				continue
+			}
+			if len(items) == 50 {
+				hasMore = true
+				break
 			}
 			item := feedItemResponse{createPostResponse: newPostResponse(post.Post, post.Author)}
 			if ranked {
 				item.Score = &score
 			}
 			items = append(items, item)
-			if len(items) == 51 {
-				break
-			}
-		}
-		hasMore := len(items) > 50
-		if hasMore {
-			items = items[:50]
 		}
 		return c.JSON(http.StatusOK, getFeedResponse{Items: items, HasMore: hasMore})
 	}

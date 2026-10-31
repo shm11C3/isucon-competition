@@ -102,6 +102,11 @@ type viewerContext struct {
 }
 
 func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID string) (viewerContext, error) {
+	return loadViewerContextWithGraph(ctx, db, viewerID, true)
+}
+
+// Direct-friend and public feeds do not use second-degree relationships.
+func loadViewerContextWithGraph(ctx context.Context, db sqlx.QueryerContext, viewerID string, includeFriendsOfFriends bool) (viewerContext, error) {
 	viewer := viewerContext{Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, MutualFriends: map[string]int{}}
 	var row struct {
 		User           User   `db:"user"`
@@ -155,6 +160,9 @@ func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID str
 	}
 	for _, id := range friends {
 		viewer.Friends[id] = true
+	}
+	if !includeFriendsOfFriends {
+		return viewer, nil
 	}
 	query, args, err := sqlx.In(`SELECT user_low_id, user_high_id FROM friendships WHERE user_low_id IN (?) OR user_high_id IN (?)`, friends, friends)
 	if err != nil {
