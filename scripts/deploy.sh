@@ -13,7 +13,7 @@ deploy() {
 	rsync -a -e "ssh -F $CFG -o BatchMode=yes" --exclude '._*' --exclude 'go/isureal' go sql public "$h:webapp/"
 	ssh -F "$CFG" -o BatchMode=yes "$h" 'set -eu
 		cd ~/webapp/go
-		PATH=$HOME/local/go/bin:$PATH go build -o isureal.new cmd/isureal/main.go
+		PATH=$HOME/local/go/bin:$PATH go build -pgo=cmd/isureal/jpeg.pgo -o isureal.new cmd/isureal/main.go
 		mv isureal.new isureal
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
 		set -- isureal-go
