@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 
 	"example.com/isureal-company/isureal"
@@ -10,6 +12,9 @@ import (
 
 func main() {
 	config := isureal.ConfigFromEnv()
+	if addr := os.Getenv("ISUREAL_PPROF"); addr != "" {
+		go http.ListenAndServe(addr, nil)
+	}
 	server := isureal.NewServer(config)
 	port := os.Getenv("ISUREAL_PORT")
 	if port == "" {
