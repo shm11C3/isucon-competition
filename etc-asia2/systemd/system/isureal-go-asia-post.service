@@ -8,7 +8,7 @@ User=isucon
 Group=isucon
 WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
-ExecStart=/usr/bin/env GOMEMLIMIT=350MiB ISUREAL_REGION=asia ISUREAL_PORT=8086 ISUREAL_PPROF= ISUREAL_IMAGE_CACHE_PEER_URL=http://192.168.1.10:8080 /home/isucon/webapp/go/isureal
+ExecStart=/usr/bin/env GOMEMLIMIT=350MiB ISUREAL_REGION=asia ISUREAL_PORT=8086 ISUREAL_PPROF= ISUREAL_IMAGE_STORE_DIR= ISUREAL_IMAGE_CACHE_PEER_URL=http://192.168.1.10:8080 /home/isucon/webapp/go/isureal
 Restart=on-failure
 RestartSec=5
 
