@@ -62,10 +62,21 @@ func getNotificationsHandler(h *HandlerContext) echo.HandlerFunc {
 			}
 			var notification getNotificationsResponse
 			err = h.DB.GetContext(ctx, &notification, `
-    SELECT n.id, n.posting_window_id, w.region, n.created_at
-    FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
-    WHERE n.user_id = $1 AND n.created_at > $2 AND w.ended_at IS NULL
-    ORDER BY n.created_at, n.id LIMIT 1
+    WITH batch_candidates AS MATERIALIZED (
+      SELECT b.recipients ->> $1 AS id, b.posting_window_id, w.region, b.created_at
+      FROM notification_batches b JOIN posting_windows w ON w.id = b.posting_window_id
+      WHERE b.created_at > $2 AND w.ended_at IS NULL
+    )
+    SELECT id, posting_window_id, region, created_at
+    FROM (
+      SELECT n.id, n.posting_window_id, w.region, n.created_at
+      FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
+      WHERE n.user_id = $1 AND n.created_at > $2 AND w.ended_at IS NULL
+      UNION ALL
+      SELECT id, posting_window_id, region, created_at
+      FROM batch_candidates WHERE id IS NOT NULL
+    ) AS pending
+    ORDER BY created_at, id LIMIT 1
    `, userID, connectedAt)
 			if err == nil {
 				data, err := json.Marshal(notification)
