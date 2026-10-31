@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createRunRecorder, parseRunOptions } from './run-record.mjs';
 
 // ---- 調整用セレクタ・定数 (UIが違えばここだけ直す) ----
 const BASE = 'https://portal.isucon.net';
@@ -20,7 +21,11 @@ const PROFILE = path.join(os.homedir(), '.config/isu-portal/profile');
 const COOKIE_FILE = path.join(os.homedir(), '.config/isu-portal/portal-cookies.json');
 const [cmd, ...rest] = process.argv.slice(2);
 
-const die = (code, msg) => { console.error(msg); process.exit(code); };
+let activeRun = null;
+const die = (code, msg) => {
+  if (activeRun) { activeRun.write('error', { error: 'RunFailed' }); activeRun = null; }
+  console.error(msg); process.exit(code);
+};
 
 async function open(headless) {
   fs.mkdirSync(PROFILE, { recursive: true });
@@ -99,7 +104,11 @@ async function main() {
     out(r); await ctx.close(); return;
   }
   if (cmd === 'run') {
-    const li = rest.indexOf('--label'); const label = li >= 0 ? rest[li + 1] : null;
+    let options;
+    try { options = parseRunOptions(rest); } catch (e) { die(2, e.message); }
+    const { label } = options;
+    const recorder = createRunRecorder(options);
+    activeRun = recorder;
     const { ctx, page } = await open(true);
     await gotoJobs(ctx, page);
     const before = await jobIds(page);
@@ -113,6 +122,7 @@ async function main() {
     let btn = page.getByRole(REQUEST_BUTTON.role, { name: REQUEST_BUTTON.name }).first();
     if (!(await btn.count())) btn = page.getByRole('link', { name: REQUEST_BUTTON.name }).first();
     if (!(await btn.count())) await mismatch(ctx, page, '依頼ボタンが見つからない(REQUEST_BUTTON)');
+    recorder.write('intent');
     await btn.click();
     let id = null; const t0 = Date.now();
     while (Date.now() - t0 < 30000 && !id) {
@@ -121,15 +131,18 @@ async function main() {
       id = (await jobIds(page)).find((i) => i > last) ?? null;
     }
     if (!id) await mismatch(ctx, page, '依頼後に新しいジョブIDが現れない');
+    recorder.write('job_created', { job: id, status: 'WAITING' });
     let r;
     while (true) {
       r = await readJob(page, id);
       if (r.done) break;
-      if (Date.now() - t0 > TIMEOUT_MS) { out(r, label); await ctx.close(); die(1, `タイムアウト: #${id} は ${r.status}`); }
+      if (Date.now() - t0 > TIMEOUT_MS) { recorder.write('result', r); out(r, label); await ctx.close(); die(1, `タイムアウト: #${id} は ${r.status}`); }
       await page.waitForTimeout(POLL_MS);
     }
-    out(r, label); await ctx.close(); process.exit(r.pass === true ? 0 : 1);
+    recorder.write('result', r); out(r, label); await ctx.close(); process.exit(r.pass === true ? 0 : 1);
   }
   die(2, 'usage: node portal-bench.mjs login | run [--label TEXT] | status [job]');
 }
-main().catch((e) => die(2, `error: ${e.message}`));
+main().catch((e) => {
+  die(2, `error: ${e.message}`);
+});
