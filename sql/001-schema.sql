@@ -28,6 +28,9 @@ CREATE TABLE image_objects (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
+-- JPEG payloads are already compressed; keep out-of-line storage without
+-- spending CPU trying to compress each new image again.
+ALTER TABLE image_objects ALTER COLUMN data SET STORAGE EXTERNAL;
 CREATE TABLE image_objects_202409 PARTITION OF image_objects FOR VALUES FROM ('2024-09-01 00:00:00+00') TO ('2024-10-01 00:00:00+00');
 CREATE TABLE image_objects_202410 PARTITION OF image_objects FOR VALUES FROM ('2024-10-01 00:00:00+00') TO ('2024-11-01 00:00:00+00');
 CREATE TABLE image_objects_202411 PARTITION OF image_objects FOR VALUES FROM ('2024-11-01 00:00:00+00') TO ('2024-12-01 00:00:00+00');
