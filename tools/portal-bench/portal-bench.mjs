@@ -12,8 +12,8 @@ const JOB_URL = (id) => `${JOBS_URL}/${id}`;
 const JOB_LINK = 'a[href*="/contestant/benchmark_jobs/"]';       // 一覧内のジョブ詳細リンク
 const JOB_ID_RE = /\/benchmark_jobs\/(\d+)/;
 const REQUEST_BUTTON = { role: 'button', name: /request|enqueue|ベンチマーク.*(実行|依頼)|(実行|依頼)/i }; // 見つからなければlinkも試す
-const RESULT_JSON = 'pre, code';                                  // 結果JSONを含む要素
-const BUSY_RE = /\b(WAITING|RUNNING)\b/;
+const RESULT_JSON = 'pre';                                  // 結果JSONを含む要素
+const BUSY_RE = /\b(WAITING|PENDING|RUNNING)\b/;
 const POLL_MS = 5000, TIMEOUT_MS = 5 * 60 * 1000;
 // -------------------------------------------------------
 const PROFILE = path.join(os.homedir(), '.config/isu-portal/profile');
@@ -52,17 +52,17 @@ async function readJob(page, id) {
   await page.goto(JOB_URL(id), { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle').catch(() => {});
   const text = await page.innerText('body');
-  const status = (/\b(WAITING|RUNNING|FINISHED|ABORTED|FAILED|CANCELED|CANCELLED)\b/.exec(text) || [])[1] ?? null;
+  const status = (/Status:\s*(WAITING|PENDING|RUNNING|FINISHED|ERRORED|ABORTED|FAILED|CANCELED|CANCELLED)\b/.exec(text) || [])[1] ?? null;
   let res = null;
   for (const t of await page.$$eval(RESULT_JSON, (els) => els.map((e) => e.textContent))) {
-    try { const j = JSON.parse(t); if (j && 'pass' in j) { res = j; break; } } catch {}
+    try { const j = JSON.parse(t.slice(t.lastIndexOf('\n{') + 1)); if (j && 'pass' in j) { res = j; break; } } catch {}
   }
   const grab = (k) => (new RegExp(`${k}\\s*[:：]?\\s*([^\\n]*)`, 'i').exec(text) || [])[1]?.trim() || null;
   return {
     job: id, status,
-    pass: res ? !!res.pass : (/Passed/.test(text) ? true : /Failed/.test(text) ? false : null),
-    score: res?.score ?? null, messages: res?.messages ?? null,
-    started: grab('Started'), finished: grab('Finished'),
+    pass: res ? !!res.pass : (/Passed/.test(text) ? true : /Failed|ERRORED/.test(text) ? false : null),
+    score: res?.score ?? Number((/Score:\s*(\d+)/.exec(text) || [])[1] ?? NaN) || null, messages: res?.messages ?? null,
+    started: grab('Started At'), finished: grab('Finished At'),
     done: status !== null && !BUSY_RE.test(status),
   };
 }
@@ -106,7 +106,7 @@ async function main() {
     let id = null; const t0 = Date.now();
     while (Date.now() - t0 < 30000 && !id) {
       await page.waitForTimeout(2000);
-      await page.goto(JOBS_URL, { waitUntil: 'domcontentloaded' });
+      await gotoJobs(ctx, page);
       id = (await jobIds(page)).find((i) => i > last) ?? null;
     }
     if (!id) await mismatch(ctx, page, '依頼後に新しいジョブIDが現れない');
