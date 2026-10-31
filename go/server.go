@@ -14,6 +14,8 @@ type HandlerContext struct {
 	DB     *sqlx.DB
 	Config *Config
 	IPBans *IPBanList
+	// ImageStore is nil when post image bytes stay in the database.
+	ImageStore *imageStoreClient
 }
 
 func NewServer(config *Config) *echo.Echo {
@@ -39,9 +41,15 @@ func NewServer(config *Config) *echo.Echo {
 	}
 
 	handlerContext := &HandlerContext{
-		DB:     db,
-		Config: config,
-		IPBans: &IPBanList{},
+		DB:         db,
+		Config:     config,
+		IPBans:     &IPBanList{},
+		ImageStore: newImageStoreClient(config.ImageStoreURL, config.ImageStoreToken),
+	}
+	if store, err := newImageStoreServer(config.ImageStoreDir, config.ImageStoreToken); err != nil {
+		panic("failed to open image store: " + err.Error())
+	} else if store != nil {
+		store.Register(e)
 	}
 	e.Use(IPBanMiddleware(handlerContext))
 	if config.ApplyBarrier {

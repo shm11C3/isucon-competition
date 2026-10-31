@@ -43,6 +43,13 @@ func exportPostsHandler(h *HandlerContext) echo.HandlerFunc {
 		defer writer.Close()
 		items := make([]exportPostResponse, 0, len(posts))
 		for _, post := range posts {
+			if len(post.ImageData) == 0 && h.ImageStore != nil {
+				data, err := h.ImageStore.Get(ctx, post.ImageID)
+				if err != nil {
+					return err
+				}
+				post.ImageData = data
+			}
 			imagePath := fmt.Sprintf("images/%06d.jpg", len(items)+1)
 			image, err := writer.CreateHeader(&zip.FileHeader{Name: imagePath, Method: zip.Store})
 			if err != nil {

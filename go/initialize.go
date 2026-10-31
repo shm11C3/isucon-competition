@@ -15,13 +15,19 @@ type initializeResponse struct {
 	Model    string `json:"model"`
 }
 
-func initializeHandler(*HandlerContext) echo.HandlerFunc {
+func initializeHandler(h *HandlerContext) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		cmd := exec.Command("../sql/init.sh")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return err
+		}
+		if h.ImageStore != nil {
+			// Images uploaded since the initial data are files on the primary host.
+			if err := h.ImageStore.Wipe(c.Request().Context()); err != nil {
+				return err
+			}
 		}
 
 		// Set language to the implementation language.

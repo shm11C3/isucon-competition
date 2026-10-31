@@ -89,6 +89,16 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		if len(object.Data) == 0 && h.ImageStore != nil {
+			data, err := h.ImageStore.Get(ctx, input.ImageID)
+			if errors.Is(err, errImageStoreMissing) {
+				return NewAPIError(http.StatusForbidden, "image_forbidden")
+			}
+			if err != nil {
+				return err
+			}
+			object.Data = data
+		}
 		putCachedImage(input.ImageID, &cachedImage{data: object.Data, mediaType: object.MediaType})
 		return c.Blob(http.StatusOK, object.MediaType, object.Data)
 	}

@@ -89,6 +89,14 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 		userID := GetSession(c).UserID
 		imageID := uuid.NewString()
 		postID := uuid.NewString()
+		storedData := imageData
+		if h.ImageStore != nil {
+			// Bytes go to the durable store first; the replicated row carries no payload.
+			if err := h.ImageStore.Put(ctx, imageID, imageData); err != nil {
+				return err
+			}
+			storedData = []byte{}
+		}
 		var created PostWithAuthor
 		err = h.DB.GetContext(ctx, &created, `
   SELECT post_id AS id, post_author_id AS author_id, posting_window_id,
@@ -101,7 +109,7 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
          author_region AS "author.region", author_account_type AS "author.account_type",
          author_status AS "author.status"
   FROM public.create_post_v1($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
- `, userID, postID, imageID, imageData, input.Caption, input.Visibility,
+ `, userID, postID, imageID, storedData, input.Caption, input.Visibility,
 			location.Kind, location.Latitude, location.Longitude, location.Locality)
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -119,6 +127,10 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 		if err := created.Author.setImageKey(); err != nil {
 			return err
+		}
+		if h.ImageStore != nil {
+			// The uploading region serves most views of this image from memory.
+			putCachedImage(imageID, &cachedImage{data: imageData, mediaType: "image/jpeg"})
 		}
 		return c.JSON(http.StatusCreated, newPostResponse(created.Post, created.Author))
 	}

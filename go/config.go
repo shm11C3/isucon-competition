@@ -14,20 +14,27 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	LogLevel   string
+	// Post image bytes: served by the process with ImageStoreDir, reached via ImageStoreURL.
+	ImageStoreDir   string
+	ImageStoreURL   string
+	ImageStoreToken string
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
 }
 
 func ConfigFromEnv() *Config {
 	return &Config{
-		Region:       envOrDefault("ISUREAL_REGION", "asia"),
-		DBHost:       envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
-		DBPort:       envOrDefault("ISUREAL_DB_PORT", "5432"),
-		DBUser:       envOrDefault("ISUREAL_DB_USER", "isureal"),
-		DBPassword:   envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
-		DBName:       envOrDefault("ISUREAL_DB_NAME", "isureal"),
-		LogLevel:     envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
-		ApplyBarrier: envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
+		Region:          envOrDefault("ISUREAL_REGION", "asia"),
+		DBHost:          envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
+		DBPort:          envOrDefault("ISUREAL_DB_PORT", "5432"),
+		DBUser:          envOrDefault("ISUREAL_DB_USER", "isureal"),
+		DBPassword:      envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
+		DBName:          envOrDefault("ISUREAL_DB_NAME", "isureal"),
+		LogLevel:        envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
+		ImageStoreDir:   envOrDefault("ISUREAL_IMAGE_STORE_DIR", ""),
+		ImageStoreURL:   envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
+		ImageStoreToken: envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
+		ApplyBarrier:    envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
 	}
 }
 
