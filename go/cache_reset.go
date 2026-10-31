@@ -22,6 +22,9 @@ func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
 			return fmt.Errorf("reload IP bans: %w", err)
 		}
 	}
+	// Refill the (now empty) image cache from the reset database in the
+	// background; the initialize response does not wait for it.
+	startImagePreload(h.DB)
 	return nil
 }
 
