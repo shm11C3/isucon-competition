@@ -1,11 +1,8 @@
 package isureal
 
 import (
-	"bytes"
 	"database/sql"
 	"errors"
-	"image/jpeg"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -17,16 +14,20 @@ func putProfileImageHandler(h *HandlerContext) echo.HandlerFunc {
 		if c.Request().Header.Get("Content-Type") != "image/jpeg" {
 			return NewAPIError(http.StatusUnsupportedMediaType, "unsupported_media_type")
 		}
-		data, err := io.ReadAll(c.Request().Body)
+		data, err := readUploadBody(c.Request().Body, c.Request().ContentLength, smallImageMaxBytes)
+		if uploadLimitError(err) {
+			c.Set("abuse", "invalid_image")
+			return NewAPIError(http.StatusBadRequest, "invalid_profile_image")
+		}
 		if err != nil {
 			return err
 		}
-		img, err := jpeg.Decode(bytes.NewReader(data))
+		width, height, err := validateJPEG(data, h.Config.FastJPEG)
 		if err != nil {
 			c.Set("abuse", "invalid_image")
 			return NewAPIError(http.StatusBadRequest, "invalid_profile_image")
 		}
-		if img.Bounds().Dx() > 512 || img.Bounds().Dy() > 512 {
+		if width > 512 || height > 512 {
 			return NewAPIError(http.StatusBadRequest, "invalid_profile_image")
 		}
 

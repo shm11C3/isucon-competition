@@ -14,6 +14,8 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	LogLevel   string
+	// FastJPEG validates uploads from the header and marker structure instead of decoding pixels.
+	FastJPEG bool
 }
 
 func ConfigFromEnv() *Config {
@@ -25,6 +27,7 @@ func ConfigFromEnv() *Config {
 		DBPassword: envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
 		DBName:     envOrDefault("ISUREAL_DB_NAME", "isureal"),
 		LogLevel:   envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
+		FastJPEG:   envOrDefault("ISUREAL_FAST_JPEG", "1") != "0",
 	}
 }
 

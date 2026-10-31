@@ -1,11 +1,8 @@
 package isureal
 
 import (
-	"bytes"
 	"database/sql"
 	"errors"
-	"image/jpeg"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -73,15 +70,15 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		defer imageFile.Close()
-		imageData, err := io.ReadAll(imageFile)
+		imageData, err := readUploadBody(imageFile, input.Image.Size, postImageMaxBytes)
+		if uploadLimitError(err) {
+			return NewAPIError(http.StatusBadRequest, "invalid_post")
+		}
 		if err != nil {
 			return err
 		}
-		img, err := jpeg.Decode(bytes.NewReader(imageData))
-		if err != nil {
-			return NewAPIError(http.StatusBadRequest, "invalid_post")
-		}
-		if img.Bounds().Dx() > 4096 || img.Bounds().Dy() > 4096 {
+		width, height, err := validateJPEG(imageData, h.Config.FastJPEG)
+		if err != nil || width > 4096 || height > 4096 {
 			return NewAPIError(http.StatusBadRequest, "invalid_post")
 		}
 
