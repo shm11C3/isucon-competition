@@ -8,29 +8,30 @@ printf 'deploy checkout_sha=%s\n' "$checkout_sha" >&2
 if test -n "$(git status --porcelain -- go sql public)"; then
 	printf 'warning: local source changes are included; checkout SHA alone does not identify this deployment\n' >&2
 fi
-america_unit_state() {
-	local host=$1 output load_state unit_state
-	if ! output=$(ssh -F "$CFG" -o BatchMode=yes "$host" 'systemctl show isureal-go-america.service -p LoadState -p UnitFileState'); then
-		printf 'deploy preflight failed: cannot inspect America unit on %s\n' "$host" >&2
+enabled_unit_state() {
+	local host=$1 unit=$2 output load_state unit_state
+	if ! output=$(ssh -F "$CFG" -o BatchMode=yes "$host" "systemctl show --all $unit -p LoadState -p UnitFileState"); then
+		printf 'deploy preflight failed: cannot inspect %s on %s\n' "$unit" "$host" >&2
 		return 1
 	fi
 	load_state=$(printf '%s\n' "$output" | awk -F= '$1 == "LoadState" { count++; value = substr($0, index($0, "=") + 1) } END { if (count == 1) print value; else exit 1 }') || {
-		printf 'deploy preflight failed: invalid LoadState from %s\n' "$host" >&2
+		printf 'deploy preflight failed: invalid LoadState for %s on %s\n' "$unit" "$host" >&2
 		return 1
 	}
 	unit_state=$(printf '%s\n' "$output" | awk -F= '$1 == "UnitFileState" { count++; value = substr($0, index($0, "=") + 1) } END { if (count == 1) print value; else exit 1 }') || {
-		printf 'deploy preflight failed: invalid UnitFileState from %s\n' "$host" >&2
+		printf 'deploy preflight failed: invalid UnitFileState for %s on %s\n' "$unit" "$host" >&2
 		return 1
 	}
 	case "$load_state:$unit_state" in
 		loaded:enabled|loaded:enabled-runtime) printf 'enabled\n' ;;
 		not-found:*) printf 'disabled\n' ;;
 		loaded:disabled) printf 'disabled\n' ;;
-		*) printf 'deploy preflight failed: ambiguous America unit state on %s (LoadState=%s UnitFileState=%s)\n' "$host" "$load_state" "$unit_state" >&2; return 1 ;;
+		*) printf 'deploy preflight failed: ambiguous unit state for %s on %s (LoadState=%s UnitFileState=%s)\n' "$unit" "$host" "$load_state" "$unit_state" >&2; return 1 ;;
 	esac
 }
-asia1_america_state=$(america_unit_state asia1) || exit 1
-asia2_america_state=$(america_unit_state asia2) || exit 1
+asia1_america_state=$(enabled_unit_state asia1 isureal-go-america.service) || exit 1
+asia2_america_state=$(enabled_unit_state asia2 isureal-go-america.service) || exit 1
+asia1_reads_state=$(enabled_unit_state asia1 isureal-go-asia-reads.service) || exit 1
 if [[ $asia1_america_state == enabled && $asia2_america_state == disabled ]]; then
 	america_owner=asia1
 elif [[ $asia1_america_state == disabled && $asia2_america_state == enabled ]]; then
@@ -39,13 +40,17 @@ else
 	printf 'deploy preflight failed: expected exactly one enabled America unit (asia1=%s asia2=%s)\n' "$asia1_america_state" "$asia2_america_state" >&2
 	exit 1
 fi
-printf 'deploy America owner=%s (asia1=%s asia2=%s)\n' "$america_owner" "$asia1_america_state" "$asia2_america_state" >&2
+printf 'deploy America owner=%s (asia1=%s asia2=%s) Asia reads on asia1=%s\n' "$america_owner" "$asia1_america_state" "$asia2_america_state" "$asia1_reads_state" >&2
 deploy() {
 	local h=$1
 	rsync -a -e "ssh -F $CFG -o BatchMode=yes" --exclude '._*' --exclude 'go/isureal' go sql public "$h:webapp/"
 	local america_unit=':'
 	if [[ $h == asia1 && $america_owner == asia1 ]]; then
 		america_unit='set -- "$@" isureal-go-america'
+	fi
+	local asia_reads_unit=':'
+	if [[ $h == asia1 && $asia1_reads_state == enabled ]]; then
+		asia_reads_unit='set -- "$@" isureal-go-asia-reads'
 	fi
 	local remote_script='set -eu
 		cd ~/webapp/go
@@ -57,6 +62,7 @@ deploy() {
 			set -- "$@" isureal-go-europe
 		fi
 		__AMERICA_UNIT__
+		__ASIA_READS_UNIT__
 		sudo systemctl restart "$@"
 		sleep 1
 		for unit in "$@"; do
@@ -65,6 +71,7 @@ deploy() {
 		printf "host=%s binary_sha256=" "$(hostname)"
 		sha256sum isureal'
 	remote_script=${remote_script/__AMERICA_UNIT__/$america_unit}
+	remote_script=${remote_script/__ASIA_READS_UNIT__/$asia_reads_unit}
 	ssh -F "$CFG" -o BatchMode=yes "$h" "$remote_script"
 }
 hosts=(asia1 europe1 america1)
