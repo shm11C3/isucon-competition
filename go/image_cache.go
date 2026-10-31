@@ -2,20 +2,14 @@ package isureal
 
 import (
 	"sync"
-	"sync/atomic"
-	"time"
 )
 
-// imageVisibilityTTL keeps deletions visible within the 5 second allowance.
-const imageVisibilityTTL = 2 * time.Second
 const imageCacheMaxBytes = 1 << 30
 const imageSignatureCacheMaxEntries = 200000
 
 type cachedImage struct {
-	secretKeyHash string
-	data          []byte
-	mediaType     string
-	checkedAt     atomic.Int64
+	data      []byte
+	mediaType string
 }
 
 var imageCache = struct {
@@ -31,7 +25,6 @@ func getCachedImage(id string) *cachedImage {
 }
 
 func putCachedImage(id string, image *cachedImage) {
-	image.checkedAt.Store(time.Now().UnixNano())
 	imageCache.Lock()
 	defer imageCache.Unlock()
 	if imageCache.bytes+len(image.data) > imageCacheMaxBytes {
@@ -51,10 +44,6 @@ func deleteCachedImage(id string) {
 		imageCache.bytes -= len(image.data)
 		delete(imageCache.entries, id)
 	}
-}
-
-func (i *cachedImage) visibilityFresh() bool {
-	return time.Now().UnixNano()-i.checkedAt.Load() < int64(imageVisibilityTTL)
 }
 
 type imageSignatureKey struct {

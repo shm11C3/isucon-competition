@@ -41,23 +41,15 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 
 		ctx := c.Request().Context()
-		cached := getCachedImage(input.ImageID)
+		// 公開範囲は毎回確認する。byteaと署名だけキャッシュする。
 		var secretKeyHash string
-		if cached != nil && cached.visibilityFresh() {
-			secretKeyHash = cached.secretKeyHash
-		} else {
-			err = h.DB.GetContext(ctx, &secretKeyHash, `
-   SELECT u.secret_key_hash
-   FROM image_objects i JOIN users u ON u.id = i.owner_user_id
-   WHERE i.id = $1 AND u.status = 'active'
-  `, input.ImageID)
-			if errors.Is(err, sql.ErrNoRows) {
-				deleteCachedImage(input.ImageID)
-				return NewAPIError(http.StatusForbidden, "image_forbidden")
-			}
-			if err != nil {
-				return err
-			}
+		err = h.DB.GetContext(ctx, &secretKeyHash, imageVisibilityQuery, input.ImageID)
+		if errors.Is(err, sql.ErrNoRows) {
+			deleteCachedImage(input.ImageID)
+			return NewAPIError(http.StatusForbidden, "image_forbidden")
+		}
+		if err != nil {
+			return err
 		}
 		key, err := imageSigningKey(secretKeyHash)
 		if err != nil {
@@ -68,24 +60,10 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
 
-		// 削除状態はimageVisibilityTTLごとに確認する。5秒以内の許容範囲に収まる。
-		if cached != nil && cached.visibilityFresh() {
-			return c.Blob(http.StatusOK, cached.mediaType, cached.data)
-		}
-		var visible bool
-		err = h.DB.GetContext(ctx, &visible, `SELECT EXISTS (`+imageVisibilityQuery+`)`, input.ImageID)
-		if err != nil {
-			return err
-		}
-		if !visible {
-			deleteCachedImage(input.ImageID)
-			return NewAPIError(http.StatusForbidden, "image_forbidden")
-		}
 		if exp <= time.Now().Unix() {
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
-		if cached != nil {
-			cached.checkedAt.Store(time.Now().UnixNano())
+		if cached := getCachedImage(input.ImageID); cached != nil {
 			return c.Blob(http.StatusOK, cached.mediaType, cached.data)
 		}
 		var object struct {
@@ -99,13 +77,13 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		putCachedImage(input.ImageID, &cachedImage{secretKeyHash: secretKeyHash, data: object.Data, mediaType: object.MediaType})
+		putCachedImage(input.ImageID, &cachedImage{data: object.Data, mediaType: object.MediaType})
 		return c.Blob(http.StatusOK, object.MediaType, object.Data)
 	}
 }
 
 const imageVisibilityQuery = `
-   SELECT 1
+   SELECT u.secret_key_hash
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
    WHERE i.id = $1 AND (
      u.profile_image_id = i.id
