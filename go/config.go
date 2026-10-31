@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -20,25 +21,38 @@ type Config struct {
 	ImageStoreToken string
 	// ImageCachePeerURL is the GET process on this host whose cache receives uploaded bytes.
 	ImageCachePeerURL string
+	// ImageCacheResetPeerURLs are the AP base URLs reset by initialize.
+	ImageCacheResetPeerURLs []string
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
 }
 
 func ConfigFromEnv() *Config {
 	return &Config{
-		Region:            envOrDefault("ISUREAL_REGION", "asia"),
-		DBHost:            envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
-		DBPort:            envOrDefault("ISUREAL_DB_PORT", "5432"),
-		DBUser:            envOrDefault("ISUREAL_DB_USER", "isureal"),
-		DBPassword:        envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
-		DBName:            envOrDefault("ISUREAL_DB_NAME", "isureal"),
-		LogLevel:          envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
-		ImageStoreDir:     envOrDefault("ISUREAL_IMAGE_STORE_DIR", ""),
-		ImageStoreURL:     envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
-		ImageStoreToken:   envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
-		ImageCachePeerURL: envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
-		ApplyBarrier:      envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
+		Region:                  envOrDefault("ISUREAL_REGION", "asia"),
+		DBHost:                  envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
+		DBPort:                  envOrDefault("ISUREAL_DB_PORT", "5432"),
+		DBUser:                  envOrDefault("ISUREAL_DB_USER", "isureal"),
+		DBPassword:              envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
+		DBName:                  envOrDefault("ISUREAL_DB_NAME", "isureal"),
+		LogLevel:                envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
+		ImageStoreDir:           envOrDefault("ISUREAL_IMAGE_STORE_DIR", ""),
+		ImageStoreURL:           envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
+		ImageStoreToken:         envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
+		ImageCachePeerURL:       envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
+		ImageCacheResetPeerURLs: splitURLs(os.Getenv("ISUREAL_CACHE_RESET_PEERS")),
+		ApplyBarrier:            envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
 	}
+}
+
+func splitURLs(value string) []string {
+	var urls []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			urls = append(urls, strings.TrimRight(item, "/"))
+		}
+	}
+	return urls
 }
 
 func (c *Config) DatabaseDSN() string {

@@ -1,6 +1,7 @@
 SET session_replication_role = replica;
 
 BEGIN;
+SET LOCAL synchronous_commit = 'remote_apply';
 
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 
