@@ -29,6 +29,12 @@ func initializeHandler(h *HandlerContext) echo.HandlerFunc {
 				return err
 			}
 		}
+		if err := resetLocalCaches(c.Request().Context(), h); err != nil {
+			return err
+		}
+		if err := resetPeerCaches(c.Request().Context(), h.Config.ImageCacheResetPeerURLs, h.Config.ImageStoreToken); err != nil {
+			return err
+		}
 
 		// Set language to the implementation language.
 		// Agents optimizing this app: set agent, harness, and model to the names used.

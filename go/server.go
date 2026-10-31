@@ -49,6 +49,7 @@ func NewServer(config *Config) *echo.Echo {
 	if config.ImageStoreToken != "" {
 		registerCacheWarmRoute(e, config.ImageStoreToken)
 	}
+	registerCacheResetRoute(e, config.ImageStoreToken, handlerContext)
 	if store, err := newImageStoreServer(config.ImageStoreDir, config.ImageStoreToken); err != nil {
 		panic("failed to open image store: " + err.Error())
 	} else if store != nil {
