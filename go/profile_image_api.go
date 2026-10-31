@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"image"
 	"image/jpeg"
 	"io"
 	"net/http"
@@ -12,17 +13,47 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+var errInvalidProfileJPEG = errors.New("invalid profile image jpeg")
+
+type profileImageBodyReader struct {
+	body io.Reader
+	err  error
+}
+
+func (reader *profileImageBodyReader) Read(p []byte) (int, error) {
+	n, err := reader.body.Read(p)
+	if err != nil && err != io.EOF && reader.err == nil {
+		reader.err = err
+	}
+	return n, err
+}
+
+func readAndDecodeProfileImage(body io.Reader) ([]byte, image.Image, error) {
+	var data bytes.Buffer
+	reader := &profileImageBodyReader{body: body}
+	img, decodeErr := jpeg.Decode(io.TeeReader(reader, &data))
+	if reader.err != nil {
+		return nil, nil, reader.err
+	}
+	if decodeErr != nil {
+		return nil, nil, errInvalidProfileJPEG
+	}
+	if _, err := io.Copy(&data, reader); err != nil {
+		return nil, nil, err
+	}
+	return data.Bytes(), img, nil
+}
+
 func putProfileImageHandler(h *HandlerContext) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if c.Request().Header.Get("Content-Type") != "image/jpeg" {
 			return NewAPIError(http.StatusUnsupportedMediaType, "unsupported_media_type")
 		}
-		data, err := io.ReadAll(c.Request().Body)
+		data, img, err := readAndDecodeProfileImage(c.Request().Body)
 		if err != nil {
-			return err
-		}
-		img, err := jpeg.Decode(bytes.NewReader(data))
-		if err != nil {
+			if !errors.Is(err, errInvalidProfileJPEG) {
+				return err
+			}
 			c.Set("abuse", "invalid_image")
 			return NewAPIError(http.StatusBadRequest, "invalid_profile_image")
 		}
