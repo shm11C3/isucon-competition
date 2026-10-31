@@ -62,9 +62,15 @@ func normalizeSearchTextUncached(value string) string {
 // NormalizeSearchText is shared with the one-off database backfill command.
 func NormalizeSearchText(value string) string { return normalizeSearchText(value) }
 
+var searchLikeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func searchLikePattern(query string) string {
+	return "%" + searchLikeEscaper.Replace(query) + "%"
+}
+
 var searchUsersSQL = `SELECT ` + strings.Join(userColumns, ", ") + ` FROM users u
  WHERE u.status='active' AND u.id<>$1 AND ($2='' OR (u.username,u.id)>($2,$3))
-   AND (strpos(u.search_username,$4)>0 OR strpos(u.search_display_name,$4)>0)
+   AND ((u.search_username COLLATE "C") LIKE $4 ESCAPE E'\\' OR (u.search_display_name COLLATE "C") LIKE $4 ESCAPE E'\\')
    AND NOT EXISTS (SELECT 1 FROM block_relations b WHERE (b.blocker_id=$1 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$1))
  ORDER BY u.username,u.id LIMIT 51`
 
@@ -85,9 +91,10 @@ func searchUsersHandler(h *HandlerContext) echo.HandlerFunc {
 		if strings.ContainsRune(query, '\x00') {
 			return c.JSON(http.StatusOK, searchUsersResponse{Items: make([]relationshipUserResponse, 0)})
 		}
+		pattern := searchLikePattern(query)
 		viewer := GetSession(c).UserID
 		var users []User
-		if err := h.DB.SelectContext(ctx, &users, searchUsersSQL, viewer, input.BeforeUsername, input.BeforeID, query); err != nil {
+		if err := h.DB.SelectContext(ctx, &users, searchUsersSQL, viewer, input.BeforeUsername, input.BeforeID, pattern); err != nil {
 			return err
 		}
 		items := make([]relationshipUserResponse, 0, 51)

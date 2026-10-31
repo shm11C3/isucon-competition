@@ -87,6 +87,7 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 	for i, value := range []struct{ username, display string }{
 		{"unicode-ss", "Straße"}, {"unicode-e", "Cafe\u0301"}, {"unicode-greek", "ΟΣ"},
 		{"unicode-tr", "İstanbul"}, {"literal-percent", "100%_real"},
+		{"literal-backslash", `path\needle`},
 	} {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id,username,display_name,search_username,search_display_name) VALUES ($1,$2,$3,$4,$5)`, fmt.Sprintf("unicode-%d", i), value.username, value.display, normalizeSearchText(value.username), normalizeSearchText(value.display)); err != nil {
 			t.Fatal("insert unicode fixture")
@@ -104,13 +105,13 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal("commit fixture")
 	}
-	queries := []string{"needle", "strasse", "café", "οσ", "i\u0307stanbul", "%_"}
+	queries := []string{"needle", "strasse", "café", "οσ", "i\u0307stanbul", "%_", `\`}
 	blocked := map[string]bool{"id-00001": true, "id-00002": true}
 	for _, rawQuery := range queries {
 		for _, cursor := range []struct{ username, id string }{{"", ""}, {"user-00020", "id-00020"}} {
 			query := normalizeSearchText(rawQuery)
 			var got []User
-			if err := db.SelectContext(ctx, &got, searchUsersSQL, "viewer", cursor.username, cursor.id, query); err != nil {
+			if err := db.SelectContext(ctx, &got, searchUsersSQL, "viewer", cursor.username, cursor.id, searchLikePattern(query)); err != nil {
 				t.Fatal("run SQL search")
 			}
 			var all []struct {
@@ -160,7 +161,7 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 		t.Fatal("updated normalized value not searchable")
 	}
 	var renamed []User
-	if err := db.SelectContext(ctx, &renamed, searchUsersSQL, "viewer", "", "", normalizeSearchText("renamed")); err != nil || len(renamed) != 1 || renamed[0].ID != "id-00000" {
+	if err := db.SelectContext(ctx, &renamed, searchUsersSQL, "viewer", "", "", searchLikePattern(normalizeSearchText("renamed"))); err != nil || len(renamed) != 1 || renamed[0].ID != "id-00000" {
 		t.Fatal("updated display name did not match search query")
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE users u SET display_name=i.display_name,search_username=i.search_username,search_display_name=i.search_display_name FROM initial_users i WHERE u.id=i.id AND u.id='id-00000'`); err != nil {
@@ -171,7 +172,7 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 		t.Fatal("reset did not restore normalized source")
 	}
 	var oldName []User
-	if err := db.SelectContext(ctx, &oldName, searchUsersSQL, "viewer", "", "", normalizeSearchText("needle")); err != nil || len(oldName) == 0 || oldName[0].ID != "id-00000" {
+	if err := db.SelectContext(ctx, &oldName, searchUsersSQL, "viewer", "", "", searchLikePattern(normalizeSearchText("needle"))); err != nil || len(oldName) == 0 || oldName[0].ID != "id-00000" {
 		t.Fatal("reset source was not searchable")
 	}
 }
