@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -161,7 +162,8 @@ func (w *bufferedResponseWriter) Write(b []byte) (int, error) {
 func ApplyBarrierMiddleware(b *applyBarrier) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if b == nil || c.Request().Method == http.MethodGet {
+			// Internal store/cache routes never write to the database.
+			if b == nil || c.Request().Method == http.MethodGet || strings.HasPrefix(c.Request().URL.Path, "/internal/") {
 				return next(c)
 			}
 			resp, err := echo.UnwrapResponse(c.Response())
