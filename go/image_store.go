@@ -219,11 +219,18 @@ func (s *imageStoreServer) writeDurable(id string, data []byte) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if dir, err := os.Open(s.dir); err == nil {
-		dir.Sync()
-		dir.Close()
+	return syncDir(s.dir)
+}
+
+// syncDir makes a rename durable; any failure is reported so the caller never
+// acknowledges an upload that might not survive a crash.
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
 	}
-	return nil
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func (s *imageStoreServer) Register(e *echo.Echo) {
@@ -282,11 +289,7 @@ func (s *imageStoreServer) wipe() error {
 			return err
 		}
 	}
-	if dir, err := os.Open(s.dir); err == nil {
-		dir.Sync()
-		dir.Close()
-	}
-	return nil
+	return syncDir(s.dir)
 }
 
 func readUploadBody(r io.Reader, sizeHint int64) ([]byte, error) {
