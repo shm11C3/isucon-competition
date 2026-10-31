@@ -1,6 +1,7 @@
 CREATE INDEX IF NOT EXISTS login_sessions_token_hash ON login_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS login_sessions_user_id ON login_sessions(user_id);
-CREATE INDEX IF NOT EXISTS users_username ON users(username);
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username);
+CREATE INDEX IF NOT EXISTS users_profile_image_id ON users(profile_image_id);
 CREATE INDEX IF NOT EXISTS friendships_user_high_id ON friendships(user_high_id);
 CREATE INDEX IF NOT EXISTS follows_followee_id ON follows(followee_id);
 CREATE INDEX IF NOT EXISTS block_relations_blocked_id ON block_relations(blocked_id);

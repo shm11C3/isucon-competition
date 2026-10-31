@@ -82,20 +82,17 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 	}
 }
 
+// image_objectsの全パーティションを見ないよう、参照元から所有者を引く。
 const imageVisibilityQuery = `
-   SELECT u.secret_key_hash
-   FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
-   WHERE i.id = $1 AND (
-     u.profile_image_id = i.id
-     OR EXISTS (
-       SELECT 1 FROM posts p
-       WHERE p.image_id = i.id AND p.author_id = u.id AND p.deleted_at IS NULL
-     )
-     OR EXISTS (
-       SELECT 1 FROM realmojis r
-       JOIN posts p ON p.id = r.post_id AND p.deleted_at IS NULL
-       JOIN users author ON author.id = p.author_id AND author.status = 'active'
-       WHERE r.image_id = i.id AND r.reactor_id = u.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
-     )
-   )
+   (SELECT u.secret_key_hash FROM users u WHERE u.profile_image_id = $1 AND u.status = 'active')
+   UNION ALL
+   (SELECT u.secret_key_hash FROM posts p JOIN users u ON u.id = p.author_id AND u.status = 'active'
+    WHERE p.image_id = $1 AND p.deleted_at IS NULL)
+   UNION ALL
+   (SELECT u.secret_key_hash FROM realmojis r
+    JOIN users u ON u.id = r.reactor_id AND u.status = 'active'
+    JOIN posts p ON p.id = r.post_id AND p.deleted_at IS NULL
+    JOIN users author ON author.id = p.author_id AND author.status = 'active'
+    WHERE r.image_id = $1 AND r.replaced_at IS NULL AND r.deleted_at IS NULL)
+   LIMIT 1
 `
