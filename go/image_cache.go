@@ -42,6 +42,21 @@ var imageCache = struct {
 	insertedBytes  uint64
 }{entries: map[string]*imageCacheEntry{}, ring: list.New()}
 
+func resetImageCache() {
+	imageCache.Lock()
+	imageCache.entries = make(map[string]*imageCacheEntry)
+	imageCache.ring = list.New()
+	imageCache.bytes = 0
+	imageCache.Unlock()
+}
+
+func resetImageSignatures() {
+	imageSignatures.Lock()
+	imageSignatures.entries = make(map[imageSignatureKey][]byte)
+	imageSignatures.resetEpoch++
+	imageSignatures.Unlock()
+}
+
 func getCachedImage(id string) *cachedImage {
 	imageCache.RLock()
 	defer imageCache.RUnlock()
@@ -126,6 +141,7 @@ var imageSignatures = struct {
 	calculations   uint64
 	capacityResets uint64
 	evictedEntries uint64
+	resetEpoch     uint64
 }{entries: map[imageSignatureKey][]byte{}}
 
 var imageSignatureFlights singleflight.Group
@@ -138,6 +154,7 @@ func cachedImageSignatureWith(key []byte, imageID string, exp int64, calculate f
 	cacheKey := imageSignatureKey{key: string(key), imageID: imageID, exp: exp}
 	imageSignatures.RLock()
 	sig, ok := imageSignatures.entries[cacheKey]
+	epoch := imageSignatures.resetEpoch
 	imageSignatures.RUnlock()
 	if ok {
 		return sig
@@ -155,12 +172,14 @@ func cachedImageSignatureWith(key []byte, imageID string, exp int64, calculate f
 		sig = calculate(key, imageID, exp)
 		imageSignatures.Lock()
 		imageSignatures.calculations++
-		if len(imageSignatures.entries) >= imageSignatureCacheMaxEntries {
+		if imageSignatures.resetEpoch == epoch && len(imageSignatures.entries) >= imageSignatureCacheMaxEntries {
 			imageSignatures.capacityResets++
 			imageSignatures.evictedEntries += uint64(len(imageSignatures.entries))
 			imageSignatures.entries = map[imageSignatureKey][]byte{}
 		}
-		imageSignatures.entries[cacheKey] = sig
+		if imageSignatures.resetEpoch == epoch {
+			imageSignatures.entries[cacheKey] = sig
+		}
 		imageSignatures.Unlock()
 		return sig, nil
 	})

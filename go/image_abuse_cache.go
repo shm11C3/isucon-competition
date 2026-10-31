@@ -30,6 +30,12 @@ var recentImageKeys = struct {
 	entries map[string]recentImageKey
 }{entries: map[string]recentImageKey{}}
 
+func resetRecentImageKeys() {
+	recentImageKeys.Lock()
+	recentImageKeys.entries = make(map[string]recentImageKey)
+	recentImageKeys.Unlock()
+}
+
 // recentVisibleImageKey returns the signing key of an image that was seen as
 // visible within the recheck window, or nil.
 func recentVisibleImageKey(imageID string, now time.Time) []byte {
