@@ -52,8 +52,12 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 			}
 		}
 		// 公開範囲は毎回確認する。byteaと署名だけキャッシュする。
-		var secretKeyHash string
-		err = h.DB.GetContext(ctx, &secretKeyHash, imageVisibilityQuery, input.ImageID)
+		var owner struct {
+			SecretKeyHash string       `db:"secret_key_hash"`
+			CreatedHint   sql.NullTime `db:"created_hint"`
+		}
+		err = h.DB.GetContext(ctx, &owner, imageVisibilityQuery, input.ImageID)
+		secretKeyHash := owner.SecretKeyHash
 		if errors.Is(err, sql.ErrNoRows) {
 			deleteCachedImage(input.ImageID)
 			forgetVisibleImageKey(input.ImageID)
@@ -82,7 +86,16 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 			Data      []byte `db:"data"`
 			MediaType string `db:"media_type"`
 		}
-		err = h.DB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1`, input.ImageID)
+		// image_objects is range-partitioned by created_at; a lookup by id alone
+		// probes every partition. The owning post/realmoji was written in the same
+		// transaction, so its created_at bounds the partition to probe first.
+		err = sql.ErrNoRows
+		if owner.CreatedHint.Valid {
+			err = h.DB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1 AND created_at >= $2::timestamptz - interval '1 day' AND created_at < $2::timestamptz + interval '1 day'`, input.ImageID, owner.CreatedHint.Time)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			err = h.DB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1`, input.ImageID)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
@@ -106,12 +119,12 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 
 // image_objectsの全パーティションを見ないよう、参照元から所有者を引く。
 const imageVisibilityQuery = `
-   (SELECT u.secret_key_hash FROM users u WHERE u.profile_image_id = $1 AND u.status = 'active')
+   (SELECT u.secret_key_hash, NULL::timestamptz AS created_hint FROM users u WHERE u.profile_image_id = $1 AND u.status = 'active')
    UNION ALL
-   (SELECT u.secret_key_hash FROM posts p JOIN users u ON u.id = p.author_id AND u.status = 'active'
+   (SELECT u.secret_key_hash, p.created_at AS created_hint FROM posts p JOIN users u ON u.id = p.author_id AND u.status = 'active'
     WHERE p.image_id = $1 AND p.deleted_at IS NULL)
    UNION ALL
-   (SELECT u.secret_key_hash FROM realmojis r
+   (SELECT u.secret_key_hash, r.created_at AS created_hint FROM realmojis r
     JOIN users u ON u.id = r.reactor_id AND u.status = 'active'
     JOIN posts p ON p.id = r.post_id AND p.deleted_at IS NULL
     JOIN users author ON author.id = p.author_id AND author.status = 'active'
