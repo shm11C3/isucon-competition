@@ -46,17 +46,6 @@ func (l *IPBanList) Banned(ctx context.Context, db *sqlx.DB, ip string) (bool, e
 	return ok && time.Now().Before(until), nil
 }
 
-func (l *IPBanList) Reload(ctx context.Context, db *sqlx.DB) error {
-	l.reloading.Lock()
-	defer l.reloading.Unlock()
-	loaded, err := loadIPBans(ctx, db)
-	if err != nil {
-		return err
-	}
-	l.snapshot.Store(loaded)
-	return nil
-}
-
 func loadIPBans(ctx context.Context, db *sqlx.DB) (*ipBanSnapshot, error) {
 	var rows []ipBan
 	if err := db.SelectContext(ctx, &rows, `SELECT ip, banned_until FROM ip_bans WHERE banned_until > clock_timestamp()`); err != nil {

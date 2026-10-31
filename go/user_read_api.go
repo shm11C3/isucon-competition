@@ -31,12 +31,6 @@ var normalizeSearchTextCache struct {
 	values map[string]string
 }
 
-func clearNormalizeSearchTextCache() {
-	normalizeSearchTextCache.Lock()
-	normalizeSearchTextCache.values = make(map[string]string)
-	normalizeSearchTextCache.Unlock()
-}
-
 func normalizeSearchText(value string) string {
 	normalizeSearchTextCache.RLock()
 	normalized, ok := normalizeSearchTextCache.values[value]

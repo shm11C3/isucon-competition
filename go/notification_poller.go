@@ -15,7 +15,6 @@ const notificationPollInterval = 100 * time.Millisecond
 // per process lets idle SSE connections skip their per-user queries.
 var activeWindowGenerations atomic.Pointer[map[string]string]
 var notificationPollerOnce sync.Once
-var activeWindowRefreshMu sync.Mutex
 
 func startNotificationPoller(db *sqlx.DB) {
 	notificationPollerOnce.Do(func() {
@@ -31,8 +30,6 @@ func startNotificationPoller(db *sqlx.DB) {
 }
 
 func pollActiveWindows(db *sqlx.DB) {
-	activeWindowRefreshMu.Lock()
-	defer activeWindowRefreshMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var windows []struct {
@@ -47,13 +44,6 @@ func pollActiveWindows(db *sqlx.DB) {
 		generations[window.Region] = window.ID
 	}
 	activeWindowGenerations.Store(&generations)
-}
-
-func resetActiveWindowGenerations() {
-	activeWindowRefreshMu.Lock()
-	empty := map[string]string{}
-	activeWindowGenerations.Store(&empty)
-	activeWindowRefreshMu.Unlock()
 }
 
 func activeWindowGeneration(region string) string {
