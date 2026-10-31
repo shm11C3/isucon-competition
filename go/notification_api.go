@@ -60,17 +60,13 @@ func getNotificationsHandler(h *HandlerContext) echo.HandlerFunc {
 			if user.Region != session.Region {
 				return nil
 			}
-			// A notification exists for every user who was registered when the
-			// open window of their region started; its id is derived from the
-			// pair so reconnecting clients see the same notification.
 			var notification getNotificationsResponse
 			err = h.DB.GetContext(ctx, &notification, `
-    SELECT uuid_in(md5(w.id || ':' || u.id)::cstring)::text AS id,
-           w.id AS posting_window_id, w.region, w.starts_at AS created_at
-    FROM posting_windows w JOIN users u ON u.id = $1
-    WHERE w.region = $3 AND w.ended_at IS NULL AND w.starts_at > $2 AND u.created_at <= w.starts_at
-    ORDER BY w.starts_at LIMIT 1
-   `, userID, connectedAt, user.Region)
+    SELECT n.id, n.posting_window_id, w.region, n.created_at
+    FROM notifications n JOIN posting_windows w ON w.id = n.posting_window_id
+    WHERE n.user_id = $1 AND n.created_at > $2 AND w.ended_at IS NULL
+    ORDER BY n.created_at, n.id LIMIT 1
+   `, userID, connectedAt)
 			if err == nil {
 				data, err := json.Marshal(notification)
 				if err != nil {
