@@ -58,6 +58,9 @@ func resetPeerCachesWithClient(ctx context.Context, urls []string, token string,
 			targets = append(targets, baseURL)
 		}
 	}
+	if len(targets) == 0 {
+		return fmt.Errorf("no cache reset peers configured (ISUREAL_CACHE_RESET_PEERS)")
+	}
 	errs := make([]error, len(targets))
 	var wg sync.WaitGroup
 	for i, baseURL := range targets {
