@@ -62,6 +62,7 @@ func (s *imageStoreClient) do(ctx context.Context, method, id string, body []byt
 	if body != nil {
 		req.Header.Set("Content-Type", "image/jpeg")
 		req.ContentLength = int64(len(body))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	}
 	return s.http.Do(req)
 }
@@ -69,6 +70,11 @@ func (s *imageStoreClient) do(ctx context.Context, method, id string, body []byt
 // Put stores the bytes durably before the caller commits the metadata.
 func (s *imageStoreClient) Put(ctx context.Context, id string, data []byte) error {
 	resp, err := s.do(ctx, http.MethodPut, id, data)
+	if err != nil && ctx.Err() == nil {
+		// A reused keepalive connection can be closed by the store between
+		// requests ("broken pipe"); the PUT is idempotent per id, so retry once.
+		resp, err = s.do(ctx, http.MethodPut, id, data)
+	}
 	if err != nil {
 		return err
 	}
