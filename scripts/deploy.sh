@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build and restart the current checkout on all app servers. Run on an idle environment.
-set -eu
+set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 export CFG=${ISU_SSH_CONFIG:-../ssh_config_2026}
 checkout_sha=$(git rev-parse HEAD)
@@ -16,15 +16,39 @@ deploy() {
 		PATH=$HOME/local/go/bin:$PATH go build -o isureal.new cmd/isureal/main.go
 		mv isureal.new isureal
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
-		sudo systemctl restart isureal-go; test "$(hostname)" != ip-192-168-1-10 || sudo systemctl restart isureal-go-europe
+		set -- isureal-go
+		if test "$(hostname)" = ip-192-168-1-10; then
+			set -- "$@" isureal-go-europe
+		fi
+		sudo systemctl restart "$@"
 		sleep 1
-		systemctl is-active isureal-go
+		for unit in "$@"; do
+			systemctl is-active "$unit"
+		done
 		printf "host=%s binary_sha256=" "$(hostname)"
 		sha256sum isureal'
 }
 hosts=(asia1 europe1 america1)
 deploy_asia2() {
-	ssh -F "$CFG" -o BatchMode=yes asia1 'cat ~/webapp/go/isureal' | ssh -F "$CFG" -o BatchMode=yes asia2 'mkdir -p ~/webapp/go && cat > ~/webapp/go/isureal.new && chmod +x ~/webapp/go/isureal.new && mv ~/webapp/go/isureal.new ~/webapp/go/isureal && sudo systemctl restart isureal-go-america && sleep 1 && systemctl is-active isureal-go-america'
+	# Stage bytes first. A failed source SSH must not replace the running binary.
+	ssh -F "$CFG" -o BatchMode=yes asia1 'cat ~/webapp/go/isureal' |
+		ssh -F "$CFG" -o BatchMode=yes asia2 'set -eu; mkdir -p ~/webapp/go; cat > ~/webapp/go/isureal.new' || {
+			printf 'deploy failed: asia2 binary transfer\n' >&2
+			return 1
+		}
+	ssh -F "$CFG" -o BatchMode=yes asia2 'set -eu
+		cd ~/webapp/go
+		chmod +x isureal.new
+		mv isureal.new isureal
+		sudo systemctl restart isureal-go-america
+		sleep 1
+		systemctl is-active isureal-go-america
+		printf "host=%s binary_sha256=" "$(hostname)"
+		sha256sum isureal' || {
+			printf 'deploy failed: asia2 activation\n' >&2
+			return 1
+		}
+	printf 'deploy succeeded: asia2\n' >&2
 }
 pids=()
 for h in "${hosts[@]}"; do
