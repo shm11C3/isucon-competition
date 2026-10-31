@@ -17,6 +17,17 @@ BEGIN
     DELETE FROM notifications WHERE created_at > boundary;
   END IF;
 END $$;
+DO $$
+DECLARE boundary timestamptz := (SELECT created_at FROM initial_data_boundary);
+BEGIN
+  IF boundary IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM notification_batches WHERE created_at <= boundary
+  ) THEN
+    TRUNCATE notification_batches;
+  ELSE
+    DELETE FROM notification_batches WHERE created_at > boundary;
+  END IF;
+END $$;
 DELETE FROM comments WHERE created_at > (SELECT created_at FROM initial_data_boundary);
 DELETE FROM realmojis WHERE created_at > (SELECT created_at FROM initial_data_boundary);
 DELETE FROM posts WHERE created_at > (SELECT created_at FROM initial_data_boundary);
