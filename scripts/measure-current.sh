@@ -9,6 +9,8 @@ usage() { echo 'usage: scripts/measure-current.sh OPERATOR LABEL' >&2; exit 2; }
 [[ $# -eq 2 ]] || usage
 operator=$1
 label=$2
+portal_cli=${ISU_PORTAL_BENCH:-tools/portal-bench/portal-bench.mjs}
+[[ -f $portal_cli ]] || { echo 'portal CLI file missing; deployment not started' >&2; exit 1; }
 [[ $operator =~ ^[A-Za-z0-9._-]{1,80}$ ]] || { echo 'invalid operator identifier' >&2; exit 2; }
 [[ -n $label && $label != *$'\n'* && $label != *$'\r'* ]] || { echo 'label must be non-empty and single-line' >&2; exit 2; }
 
@@ -42,5 +44,5 @@ deployed_sha=$(tail -n 1 "$deploy_log")
   exit 1
 }
 check_source_state || exit 1
-node tools/portal-bench/portal-bench.mjs run \
+node "$portal_cli" run \
   --operator "$operator" --source-sha "$requested_sha" --label "$label"
