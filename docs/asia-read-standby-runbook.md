@@ -33,7 +33,14 @@ ALTER SYSTEM SET synchronous_standby_names = 'FIRST 3 (europe1, america1, asia1)
 - ベンチ 2 走。asia2 idle/iowait、asia1 idle、GP 完走人数を比較。
 
 ## 5. 戻し
-- nginx を GET→:8080 へ戻し reload → asia-reads 停止 → primary `synchronous_standby_names='FIRST 2 (europe1, america1)'` reload → Go の ISUREAL_SYNC_STANDBYS を外し再起動 → standby 停止・slot asia1 削除。
+
+その時点の単一環境ownerが、実行中benchなしの境界で行う。切替前の正常sourceは `7aa40c0`、元unit/env/nginx設定は実保存原本を使う。
+
+1. Asia nginxを保存原本のGET→:8080へ戻してreloadし、新 `isureal-go-asia-reads` は**stopとdisable**を行う。Asiaのreadがprimary経路になり、新local standbyを読むプロセスが停止したことを確認する。stopだけでは次のdeploy/rebootで再起動する。
+2. Asia standbyはまだ動かしたまま、primaryを `FIRST 2 (europe1, america1)` へ戻してreloadする。必要数3のGoはこの短い復旧区間で503になり得るため、benchを再開しない。**3台syncのままGo必要数だけ2へ下げない**。取消時にAsiaを含む任意2台だけでguardが通り、残る地域の未反映を見逃す窓を避ける。
+3. 既採用 `7aa40c0` のGoと切替前のservice/env/drop-inを復元し、残る5app processを再起動する。実binary/source、DB接続先、必要数2の判定を確認する。T54 `d2f78ad` は**既定3**なので、`ISUREAL_SYNC_STANDBYS` を外すだけでは2に戻らない。S版Goを一時的に残す場合は必要数2を明示して実processで確認し、そのsource/config差を復旧記録へ残す。
+4. EU/USがstreaming/sync、Asia readがprimary経路、新read unitがinactive/disabledであることを確認してから、Asia standbyを停止し、元の自動起動状態へ戻す。最後にslot `asia1` を削除する。receiver停止前にslotを消さない。
+5. 復旧source/configとhealthを確認してから通常の実験へ戻る。Mainの採否と、ownerの実復旧完了は別に記録する。
 
 ## リスク
 - asia1 CPU（WAL 適用＋asia クエリ）とメモリ（PG 768MB）。GP で asia1 が先に飽和する可能性。
