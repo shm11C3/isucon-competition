@@ -11,7 +11,7 @@ EnvironmentFile=/home/isucon/env.sh
 EnvironmentFile=/etc/isureal/local-db.env
 Environment=ISUREAL_REGION=asia
 Environment=ISUREAL_PORT=8083
-Environment=ISUREAL_PPROF_PORT=6063
+Environment=ISUREAL_PPROF=127.0.0.1:6063
 ExecStart=/home/isucon/webapp/go/isureal
 Restart=on-failure
 RestartSec=5
