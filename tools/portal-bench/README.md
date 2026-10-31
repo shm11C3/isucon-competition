@@ -19,3 +19,8 @@ GitHubログインは人間のみ。パスワード/トークンは扱わない�
 
 ## ルール
 ベンチは1人ずつ直列。`run` の前に必ず環境予約を確保すること。対象はチーム自身の環境のみ。
+
+## 現在のcheckoutをdeployして一度だけ測る
+環境予約を別途保持した人が、`scripts/measure-current.sh OPERATOR LABEL` を使う。この一回限りのfail-closed chainは、開始時HEADを固定し、全unmerged indexと `go/sql/public` のdirty/untrackedを拒否する。既存 `scripts/deploy.sh` の成功と最終stdout SHAの一致を要求し、deploy後に同じsource状態を再確認してから、operatorと要求SHAを明示して既存 `portal-bench run` を一度だけ呼ぶ。失敗時はベンチを開始しない。stdoutは既存のportal JSONのみ、deploy出力と証拠（host binary hashを含む）はstderrへ出す。
+
+SHA照合はdeploy scriptが返す要求checkout SHAの確認であり、remoteの全ファイルをattestしない。dirty判定は `go/sql/public` のみで、nginx設定などは対象外。このhelperは予約、DDL/migration、promotion、復旧を行わず、Main独自の別custom callerへ自動適用されない。別callerはそこで同じfail-fast条件を明示的に確認すること。
