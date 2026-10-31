@@ -12,6 +12,9 @@ import (
 )
 
 func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
+	profileImagePreloader.Lock()
+	defer profileImagePreloader.Unlock()
+	profileImagePreloader.stopLocked()
 	resetImageCache()
 	resetImageSignatures()
 	resetRecentImageKeys()
@@ -21,11 +24,6 @@ func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
 		if err := h.IPBans.Reload(ctx, h.DB); err != nil {
 			return fmt.Errorf("reload IP bans: %w", err)
 		}
-	}
-	// Refill the (now empty) image cache from the reset database in the
-	// background; the initialize response does not wait for it.
-	if h.Config != nil && h.Config.ImagePreload {
-		startImagePreload(h.DB)
 	}
 	return nil
 }
@@ -37,6 +35,9 @@ func registerCacheResetRoute(e *echo.Echo, token string, h *HandlerContext) {
 		}
 		if err := resetLocalCaches(c.Request().Context(), h); err != nil {
 			return err
+		}
+		if h.Config != nil && h.Config.ImagePreload {
+			startImagePreload(h.DB)
 		}
 		c.Logger().Info("cache reset complete")
 		return c.NoContent(http.StatusNoContent)

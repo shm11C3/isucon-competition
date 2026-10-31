@@ -3,12 +3,44 @@ package isureal
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 const imagePreloadBatch = 256
+
+type imagePreloadWorker struct {
+	sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+var profileImagePreloader imagePreloadWorker
+
+// Caller holds the worker lock, including while clearing caches, so a new
+// worker cannot start between cancellation and the reset.
+func (w *imagePreloadWorker) stopLocked() {
+	if w.cancel != nil {
+		w.cancel()
+		<-w.done
+		w.cancel = nil
+		w.done = nil
+	}
+}
+
+func (w *imagePreloadWorker) startLocked(run func(context.Context)) {
+	w.stopLocked()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	done := make(chan struct{})
+	w.cancel, w.done = cancel, done
+	go func() {
+		defer close(done)
+		defer cancel()
+		run(ctx)
+	}()
+}
 
 // warmProfileImages fills the image cache with every active user's profile
 // image and precomputes their signatures for the current expiry bucket. It
@@ -71,9 +103,7 @@ func warmProfileImages(ctx context.Context, db *sqlx.DB) {
 }
 
 func startImagePreload(db *sqlx.DB) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		warmProfileImages(ctx, db)
-	}()
+	profileImagePreloader.Lock()
+	defer profileImagePreloader.Unlock()
+	profileImagePreloader.startLocked(func(ctx context.Context) { warmProfileImages(ctx, db) })
 }
