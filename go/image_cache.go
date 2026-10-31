@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-const imageCacheMaxBytes = 1 << 30
+const imageCacheMaxBytes = 128 << 20
 const imageSignatureCacheMaxEntries = 200000
 
 type cachedImage struct {
