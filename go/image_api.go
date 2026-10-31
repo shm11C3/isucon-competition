@@ -41,11 +41,22 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 
 		ctx := c.Request().Context()
+		now := time.Now()
+		// A wrong signature for an image seen as visible moments ago is
+		// rejected without another visibility lookup; a matching signature
+		// always re-checks visibility below before any bytes are served.
+		if key := recentVisibleImageKey(input.ImageID, now); key != nil {
+			if !hmac.Equal(sig, cachedImageSignature(key, input.ImageID, exp)) {
+				c.Set("abuse", "invalid_signature")
+				return NewAPIError(http.StatusForbidden, "image_forbidden")
+			}
+		}
 		// 公開範囲は毎回確認する。byteaと署名だけキャッシュする。
 		var secretKeyHash string
 		err = h.DB.GetContext(ctx, &secretKeyHash, imageVisibilityQuery, input.ImageID)
 		if errors.Is(err, sql.ErrNoRows) {
 			deleteCachedImage(input.ImageID)
+			forgetVisibleImageKey(input.ImageID)
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
 		if err != nil {
@@ -55,6 +66,7 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		rememberVisibleImageKey(input.ImageID, key, now)
 		if !hmac.Equal(sig, cachedImageSignature(key, input.ImageID, exp)) {
 			c.Set("abuse", "invalid_signature")
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
