@@ -24,6 +24,9 @@ deploy() {
 		elif systemctl is-enabled -q isureal-go-post 2>/dev/null; then
 			set -- "$@" isureal-go-post
 		fi
+		if systemctl is-enabled -q isureal-go-asia-post 2>/dev/null; then
+			set -- "$@" isureal-go-asia-post
+		fi
 		sudo systemctl restart "$@"
 		sleep 1
 		for unit in "$@"; do
