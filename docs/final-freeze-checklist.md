@@ -4,17 +4,18 @@
 
 ## 直前の PASS 版（戻し先）
 
-- `141509f8`: T74 binary（04b + T-0071 + T-0065）+ T68 配置（asia POST を america1 `isureal-go-asia-post` :8086 へ、`etc-asia1/nginx/isureal-asia-post-offload.conf`）+ primary `max_connections=300`。#25879 71861 / messages 0。main と一致。
-- T68 配置だけ戻す場合: asia1 nginx を `etc-asia1/nginx/isureal.conf` に差し替えて reload、america1 `isureal-go-asia-post` を `disable --now`。
+- `89496093`（T68c）: T74 binary + T-0024 LRU + 配置「asia POST → asia2 `isureal-go-asia-post` :8086、europe 書込 → asia1 `isureal-go-europe` :8081、america 書込 → asia2 :8082」+ primary `max_connections=300`。#27198 108525 / messages 1。
+- 直前: `690c937d`（T68b、europe 書込が asia2）#26712 97102 / messages 17。`ff08f40f`（T68、asia POST が america1）#26426 74647 / messages 0。
+- 配置だけ戻す場合: asia1 nginx を `etc-asia1/nginx/isureal.conf`（POST ローカル）に差し替えて reload、asia2 `isureal-go-asia-post` を `disable --now`。
 
 ## 凍結時点の構成（16:50 に確定）
 
-- asia1: nginx(`etc-asia1/nginx/isureal-asia-post-offload.conf`、POST /api/posts は america1:8086) + `isureal-go`(:8080, asia) + guard
-- asia2: primary PostgreSQL + `isureal-go-america`(:8082, image store) + `isureal-go-europe`(:8081)
-- europe1 / america1: standby PostgreSQL + nginx(`etc-remote/nginx/*-local-reads.conf`) + `isureal-go`(:8080, GET=local standby) + `isureal-go-post`(:8084)。america1 はさらに `isureal-go-asia-post`(:8086, REGION=asia)
+- asia1: nginx(`etc-asia1/nginx/isureal-asia-post-asia2.conf`、POST /api/posts は asia2:8086) + `isureal-go`(:8080, asia) + `isureal-go-europe`(:8081, europe 書込) + guard
+- asia2: primary PostgreSQL + `isureal-go-america`(:8082, image store) + `isureal-go-asia-post`(:8086, asia 投稿)
+- europe1（nginx は `isureal-europe-writes-asia1.conf`）/ america1: standby PostgreSQL + `isureal-go`(:8080, GET=local standby) + `isureal-go-post`(:8084)
 - primary: `synchronous_standby_names = FIRST 2 (europe1, america1)`, `remote_apply`
 - 各 Go unit の drop-in `90-eaa-cache-stats.conf` は `/etc/isureal-pprof/<unit>.env`（`ISUREAL_PPROF=127.0.0.1:606x`、ローカル pprof ポートのみ）を読む。挙動に影響なし
-- 無効のまま: asia1 `isureal-go-europe` / `isureal-go-asia-reads`、america1 `isureal-go-asia-offload`、asia1 の残骸 PostgreSQL（`start.conf=manual`）
+- 無効のまま: asia1 `isureal-go-asia-reads`、asia2 `isureal-go-europe`、america1 `isureal-go-asia-offload` / `isureal-go-asia-post`、asia1 の残骸 PostgreSQL（`start.conf=manual`）
 
 ## 再起動ドリル（17:30 まで）
 
