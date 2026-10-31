@@ -38,3 +38,10 @@ ALTER SYSTEM SET synchronous_standby_names = 'FIRST 3 (europe1, america1, asia1)
 ## リスク
 - asia1 CPU（WAL 適用＋asia クエリ）とメモリ（PG 768MB）。GP で asia1 が先に飽和する可能性。
 - 停止点が 3 standby に増える。再起動ドリルのやり直しが必要。
+
+## 実施記録（2026-10-31 13:50〜13:55 JST 完了）
+- pg_basebackup asia2→asia1 約 60MB/s で 5 分。primary_conninfo に application_name=asia1 追記、conf.d/zz-standby.conf 配置、standby streaming。
+- primary synchronous_standby_names='FIRST 3 (europe1, america1, asia1)' reload、3 行 sync、バリア probe sync=3。配備 Go 7aa40c0 の barrier は ≥2 判定なので再配備なし。
+- asia1: isureal-go-asia-reads（:8083、DB 127.0.0.1）enable/start、nginx を GET→:8083 / 他→:8080 へ（旧設定 sites-available/isureal-asia-before-s.conf）。
+- 検証: asia 経由 register→login→GET /api/me 200（50ms）、PATCH→GET 反映、logout→401、feeds/public 57ms、standby の pg_stat_statements で session クエリを確認。europe 経由も回帰なし。initialize 9.3 秒、asia1 standby で boundary 以降 0 行、conflict 0、replay_lag 2ms。asia1 available 2.9GB、asia2 1.6GB。
+- 戻し: asia1 で rollback-asia-app.sh 相当（nginx を before-s へ、asia-reads 停止）→ asia2 で FIRST 2 へ reload → standby 停止・slot asia1 削除。
