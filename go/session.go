@@ -33,21 +33,12 @@ func GetSession(c *echo.Context) *Session {
 }
 
 func getSessionFromHeader(c *echo.Context, db *sqlx.DB) (*Session, error) {
-	authHeader := c.Request().Header.Get(echo.HeaderAuthorization)
-	if authHeader == "" {
-		return nil, nil
+	tokenHash, present, err := sessionTokenHashFromHeader(c)
+	if err != nil || !present {
+		return nil, err
 	}
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		c.Logger().Warn("Invalid authorization header format(not started with Bearer)")
-		return nil, NewAPIError(http.StatusUnauthorized, "invalid_session")
-	}
-
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-
-	tokenHashBytes := sha256.Sum256([]byte(token))
-	tokenHash := hex.EncodeToString(tokenHashBytes[:])
 	var session Session
-	err := db.GetContext(c.Request().Context(), &session, `
+	err = db.GetContext(c.Request().Context(), &session, `
 		SELECT s.user_id, s.token_hash, s.created_at, u.region
 		FROM login_sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -60,6 +51,69 @@ func getSessionFromHeader(c *echo.Context, db *sqlx.DB) (*Session, error) {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 	return &session, nil
+}
+
+func sessionTokenHashFromHeader(c *echo.Context) (string, bool, error) {
+	authHeader := c.Request().Header.Get(echo.HeaderAuthorization)
+	if authHeader == "" {
+		return "", false, nil
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		c.Logger().Warn("Invalid authorization header format(not started with Bearer)")
+		return "", false, NewAPIError(http.StatusUnauthorized, "invalid_session")
+	}
+
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+
+	tokenHashBytes := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(tokenHashBytes[:]), true, nil
+}
+
+type feedSessionViewerRow struct {
+	viewerContextRow
+	UserID    string    `db:"user_id"`
+	TokenHash string    `db:"token_hash"`
+	CreatedAt time.Time `db:"created_at"`
+	Region    string    `db:"region"`
+}
+
+func loadFeedSessionViewerRow(ctx context.Context, db sqlx.QueryerContext, tokenHash string) (feedSessionViewerRow, error) {
+	var row feedSessionViewerRow
+	err := sqlx.GetContext(ctx, db, &row, `
+  SELECT s.user_id, s.token_hash, s.created_at, u.region,
+         `+viewerContextColumns("u")+`
+  FROM login_sessions s JOIN users u ON u.id = s.user_id
+  WHERE s.token_hash = $1 AND s.active = true AND u.status = 'active'
+ `, tokenHash)
+	return row, err
+}
+
+func feedSessionViewerMiddleware(handlerContext *HandlerContext) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			tokenHash, present, err := sessionTokenHashFromHeader(c)
+			if err != nil {
+				return err
+			}
+			if !present {
+				return NewAPIError(http.StatusUnauthorized, "invalid_session")
+			}
+			row, err := loadFeedSessionViewerRow(c.Request().Context(), handlerContext.DB, tokenHash)
+			if errors.Is(err, sql.ErrNoRows) {
+				return NewAPIError(http.StatusUnauthorized, "invalid_session")
+			}
+			if err != nil {
+				return fmt.Errorf("failed to get session: %w", err)
+			}
+			session := &Session{UserID: row.UserID, TokenHash: row.TokenHash, CreatedAt: row.CreatedAt, Region: row.Region}
+			c.Set("session", session)
+			if session.Region != handlerContext.Config.Region {
+				return NewAPIError(http.StatusForbidden, "region_mismatch")
+			}
+			c.Set("feed-viewer-context-row", row.viewerContextRow)
+			return next(c)
+		}
+	}
 }
 
 func SessionMiddleware(handlerContext *HandlerContext, authRequired bool) echo.MiddlewareFunc {

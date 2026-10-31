@@ -101,41 +101,54 @@ type viewerContext struct {
 	Blocked          map[string]bool
 }
 
-func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID string) (viewerContext, error) {
-	viewer := viewerContext{Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, MutualFriends: map[string]int{}}
-	var row struct {
-		User           User   `db:"user"`
-		HasPostedToday bool   `db:"has_posted_today"`
-		FriendIDs      []byte `db:"friend_ids"`
-		BlockedIDs     []byte `db:"blocked_ids"`
-	}
-	err := sqlx.GetContext(ctx, db, &row, `
-  SELECT `+userColumnsAs("u", "user")+`,
+type viewerContextRow struct {
+	User           User   `db:"user"`
+	HasPostedToday bool   `db:"has_posted_today"`
+	FriendIDs      []byte `db:"friend_ids"`
+	BlockedIDs     []byte `db:"blocked_ids"`
+}
+
+func viewerContextColumns(userAlias string) string {
+	return userColumnsAs(userAlias, "user") + `,
          EXISTS(
            SELECT 1 FROM posts p
            JOIN posting_windows posted ON posted.id = p.posting_window_id
-           JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
+           JOIN posting_windows current ON current.region = ` + userAlias + `.region AND current.ended_at IS NULL
                                        AND current.local_date = posted.local_date
-           WHERE p.author_id = u.id AND p.deleted_at IS NULL
+           WHERE p.author_id = ` + userAlias + `.id AND p.deleted_at IS NULL
          ) AS has_posted_today,
          to_json(ARRAY(
-           SELECT CASE WHEN f.user_low_id = u.id THEN f.user_high_id ELSE f.user_low_id END
+           SELECT CASE WHEN f.user_low_id = ` + userAlias + `.id THEN f.user_high_id ELSE f.user_low_id END
            FROM friendships f
-           WHERE f.user_low_id = u.id OR f.user_high_id = u.id
+           WHERE f.user_low_id = ` + userAlias + `.id OR f.user_high_id = ` + userAlias + `.id
          )) AS friend_ids,
          to_json(ARRAY(
-           SELECT CASE WHEN b.blocker_id = u.id THEN b.blocked_id ELSE b.blocker_id END
+           SELECT CASE WHEN b.blocker_id = ` + userAlias + `.id THEN b.blocked_id ELSE b.blocker_id END
            FROM block_relations b
-           WHERE b.blocker_id = u.id OR b.blocked_id = u.id
-         )) AS blocked_ids
+           WHERE b.blocker_id = ` + userAlias + `.id OR b.blocked_id = ` + userAlias + `.id
+         )) AS blocked_ids`
+}
+
+func loadViewerContextRow(ctx context.Context, db sqlx.QueryerContext, viewerID string) (viewerContextRow, error) {
+	var row viewerContextRow
+	err := sqlx.GetContext(ctx, db, &row, `
+  SELECT `+viewerContextColumns("u")+`
   FROM users u
   WHERE u.id = $1 AND u.status = 'active'
  `, viewerID)
+	return row, err
+}
+
+func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID string) (viewerContext, error) {
+	row, err := loadViewerContextRow(ctx, db, viewerID)
 	if err != nil {
-		return viewer, err
+		return viewerContext{Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, MutualFriends: map[string]int{}}, err
 	}
-	viewer.User = row.User
-	viewer.HasPostedToday = row.HasPostedToday
+	return decodeViewerContext(ctx, db, row, true)
+}
+
+func decodeViewerContext(ctx context.Context, db sqlx.QueryerContext, row viewerContextRow, includeSecondHop bool) (viewerContext, error) {
+	viewer := viewerContext{User: row.User, HasPostedToday: row.HasPostedToday, Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, MutualFriends: map[string]int{}}
 	if err := viewer.User.setImageKey(); err != nil {
 		return viewer, err
 	}
@@ -150,11 +163,11 @@ func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID str
 	for _, id := range blocked {
 		viewer.Blocked[id] = true
 	}
-	if len(friends) == 0 {
-		return viewer, nil
-	}
 	for _, id := range friends {
 		viewer.Friends[id] = true
+	}
+	if len(friends) == 0 || !includeSecondHop {
+		return viewer, nil
 	}
 	query, args, err := sqlx.In(`SELECT user_low_id, user_high_id FROM friendships WHERE user_low_id IN (?) OR user_high_id IN (?)`, friends, friends)
 	if err != nil {

@@ -2,8 +2,6 @@ package isureal
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"net/http"
 	"sort"
 	"time"
@@ -48,10 +46,12 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusBadRequest, "invalid_pagination")
 		}
 		ctx := c.Request().Context()
-		viewer, err := loadViewerContext(ctx, h.DB, GetSession(c).UserID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.JSON(http.StatusOK, getFeedResponse{Items: []feedItemResponse{}})
+		row, ok := c.Get("feed-viewer-context-row").(viewerContextRow)
+		if !ok {
+			return NewAPIError(http.StatusUnauthorized, "invalid_session")
 		}
+		needsSecondHop := (input.Feed == "following" || ranked) && row.HasPostedToday
+		viewer, err := decodeViewerContext(ctx, h.DB, row, needsSecondHop)
 		if err != nil {
 			return err
 		}
