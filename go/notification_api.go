@@ -34,9 +34,22 @@ func getNotificationsHandler(h *HandlerContext) echo.HandlerFunc {
 		if err := controller.Flush(); err != nil {
 			return nil
 		}
-		ticker := time.NewTicker(500 * time.Millisecond)
+		startNotificationPoller(h.DB)
+		ticker := time.NewTicker(notificationPollInterval)
 		defer ticker.Stop()
-		for {
+		var checkedGeneration string
+		var checkedUserAt time.Time
+		for checked := false; ; checked = true {
+			generation := activeWindowGeneration(session.Region)
+			if checked && generation == checkedGeneration && time.Since(checkedUserAt) < 5*time.Second {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+				}
+				continue
+			}
+			checkedGeneration, checkedUserAt = generation, time.Now()
 			user, err := getUser(ctx, h.DB, userID)
 			if err != nil {
 				if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {

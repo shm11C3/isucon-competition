@@ -41,34 +41,71 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 
 		ctx := c.Request().Context()
+		cached := getCachedImage(input.ImageID)
 		var secretKeyHash string
-		err = h.DB.GetContext(ctx, &secretKeyHash, `
+		if cached != nil && cached.visibilityFresh() {
+			secretKeyHash = cached.secretKeyHash
+		} else {
+			err = h.DB.GetContext(ctx, &secretKeyHash, `
    SELECT u.secret_key_hash
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id
    WHERE i.id = $1 AND u.status = 'active'
   `, input.ImageID)
+			if errors.Is(err, sql.ErrNoRows) {
+				deleteCachedImage(input.ImageID)
+				return NewAPIError(http.StatusForbidden, "image_forbidden")
+			}
+			if err != nil {
+				return err
+			}
+		}
+		key, err := imageSigningKey(secretKeyHash)
+		if err != nil {
+			return err
+		}
+		if !hmac.Equal(sig, cachedImageSignature(key, input.ImageID, exp)) {
+			c.Set("abuse", "invalid_signature")
+			return NewAPIError(http.StatusForbidden, "image_forbidden")
+		}
+
+		// 削除状態はimageVisibilityTTLごとに確認する。5秒以内の許容範囲に収まる。
+		if cached != nil && cached.visibilityFresh() {
+			return c.Blob(http.StatusOK, cached.mediaType, cached.data)
+		}
+		var visible bool
+		err = h.DB.GetContext(ctx, &visible, `SELECT EXISTS (`+imageVisibilityQuery+`)`, input.ImageID)
+		if err != nil {
+			return err
+		}
+		if !visible {
+			deleteCachedImage(input.ImageID)
+			return NewAPIError(http.StatusForbidden, "image_forbidden")
+		}
+		if exp <= time.Now().Unix() {
+			return NewAPIError(http.StatusForbidden, "image_forbidden")
+		}
+		if cached != nil {
+			cached.checkedAt.Store(time.Now().UnixNano())
+			return c.Blob(http.StatusOK, cached.mediaType, cached.data)
+		}
+		var object struct {
+			Data      []byte `db:"data"`
+			MediaType string `db:"media_type"`
+		}
+		err = h.DB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1`, input.ImageID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
 		if err != nil {
 			return err
 		}
-		key, err := imageSigningKey(secretKeyHash)
-		if err != nil {
-			return err
-		}
-		if !hmac.Equal(sig, imageSignature(key, input.ImageID, exp)) {
-			c.Set("abuse", "invalid_signature")
-			return NewAPIError(http.StatusForbidden, "image_forbidden")
-		}
+		putCachedImage(input.ImageID, &cachedImage{secretKeyHash: secretKeyHash, data: object.Data, mediaType: object.MediaType})
+		return c.Blob(http.StatusOK, object.MediaType, object.Data)
+	}
+}
 
-		// 削除状態を毎回確認する。即時反映も5秒以内の許容範囲に含まれる。
-		var object struct {
-			Data      []byte `db:"data"`
-			MediaType string `db:"media_type"`
-		}
-		err = h.DB.GetContext(ctx, &object, `
-   SELECT i.data, i.media_type
+const imageVisibilityQuery = `
+   SELECT 1
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
    WHERE i.id = $1 AND (
      u.profile_image_id = i.id
@@ -83,16 +120,4 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
        WHERE r.image_id = i.id AND r.reactor_id = u.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
      )
    )
-  `, input.ImageID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return NewAPIError(http.StatusForbidden, "image_forbidden")
-		}
-		if err != nil {
-			return err
-		}
-		if exp <= time.Now().Unix() {
-			return NewAPIError(http.StatusForbidden, "image_forbidden")
-		}
-		return c.Blob(http.StatusOK, object.MediaType, object.Data)
-	}
-}
+`
