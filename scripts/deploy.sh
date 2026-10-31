@@ -18,7 +18,9 @@ deploy() {
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
 		set -- isureal-go
 		if test "$(hostname)" = ip-192-168-1-10; then
-			set -- "$@" isureal-go-europe
+			if systemctl is-enabled -q isureal-go-europe 2>/dev/null; then
+				set -- "$@" isureal-go-europe
+			fi
 		elif systemctl is-enabled -q isureal-go-post 2>/dev/null; then
 			set -- "$@" isureal-go-post
 		fi
@@ -47,7 +49,7 @@ deploy_asia2() {
 		cd ~/webapp/go
 		chmod +x isureal.new
 		mv isureal.new isureal
-		sudo systemctl restart isureal-go-america
+		sudo systemctl restart isureal-go-america; if systemctl is-enabled -q isureal-go-europe 2>/dev/null; then sudo systemctl restart isureal-go-europe; fi
 		sleep 1
 		systemctl is-active isureal-go-america
 		printf "host=%s binary_sha256=" "$(hostname)"
