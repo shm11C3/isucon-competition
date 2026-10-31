@@ -13,3 +13,6 @@ __pycache__/
 artifacts/
 *.dump
 *.sql.gz
+
+._*
+go/isureal
