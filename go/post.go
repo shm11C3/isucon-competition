@@ -3,6 +3,7 @@ package isureal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -102,27 +103,52 @@ type viewerContext struct {
 
 func loadViewerContext(ctx context.Context, db sqlx.QueryerContext, viewerID string) (viewerContext, error) {
 	viewer := viewerContext{Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, MutualFriends: map[string]int{}}
-	var err error
-	if viewer.User, err = getUser(ctx, db, viewerID); err != nil {
-		return viewer, err
+	var row struct {
+		User           User   `db:"user"`
+		HasPostedToday bool   `db:"has_posted_today"`
+		FriendIDs      []byte `db:"friend_ids"`
+		BlockedIDs     []byte `db:"blocked_ids"`
 	}
-	if err := sqlx.GetContext(ctx, db, &viewer.HasPostedToday, `
-  SELECT EXISTS(
-    SELECT 1 FROM posts p
-    JOIN posting_windows posted ON posted.id = p.posting_window_id
-    JOIN posting_windows current ON current.region = $2 AND current.ended_at IS NULL
-                                AND current.local_date = posted.local_date
-    WHERE p.author_id = $1 AND p.deleted_at IS NULL
-  )
- `, viewer.ID, viewer.Region); err != nil {
-		return viewer, err
-	}
-	if viewer.Blocked, err = getBlockedUserIDs(ctx, db, viewer.ID); err != nil {
-		return viewer, err
-	}
-	friends, err := getFriendIDs(ctx, db, viewer.ID)
+	err := sqlx.GetContext(ctx, db, &row, `
+  SELECT `+userColumnsAs("u", "user")+`,
+         EXISTS(
+           SELECT 1 FROM posts p
+           JOIN posting_windows posted ON posted.id = p.posting_window_id
+           JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
+                                       AND current.local_date = posted.local_date
+           WHERE p.author_id = u.id AND p.deleted_at IS NULL
+         ) AS has_posted_today,
+         to_json(ARRAY(
+           SELECT CASE WHEN f.user_low_id = u.id THEN f.user_high_id ELSE f.user_low_id END
+           FROM friendships f
+           WHERE f.user_low_id = u.id OR f.user_high_id = u.id
+         )) AS friend_ids,
+         to_json(ARRAY(
+           SELECT CASE WHEN b.blocker_id = u.id THEN b.blocked_id ELSE b.blocker_id END
+           FROM block_relations b
+           WHERE b.blocker_id = u.id OR b.blocked_id = u.id
+         )) AS blocked_ids
+  FROM users u
+  WHERE u.id = $1 AND u.status = 'active'
+ `, viewerID)
 	if err != nil {
 		return viewer, err
+	}
+	viewer.User = row.User
+	viewer.HasPostedToday = row.HasPostedToday
+	if err := viewer.User.setImageKey(); err != nil {
+		return viewer, err
+	}
+	var friends, blocked []string
+	if err := json.Unmarshal(row.FriendIDs, &friends); err != nil {
+		return viewer, err
+	}
+	if err := json.Unmarshal(row.BlockedIDs, &blocked); err != nil {
+		return viewer, err
+	}
+	viewer.Blocked = make(map[string]bool, len(blocked))
+	for _, id := range blocked {
+		viewer.Blocked[id] = true
 	}
 	if len(friends) == 0 {
 		return viewer, nil
