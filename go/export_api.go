@@ -27,7 +27,7 @@ func exportPostsHandler(h *HandlerContext) echo.HandlerFunc {
 			Post
 			ImageData []byte `db:"image_data"`
 		}
-		if err := h.DB.SelectContext(ctx, &posts, `
+		if err := h.ImageDB.SelectContext(ctx, &posts, `
    SELECT `+postColumns+`, i.data AS image_data
    FROM posts p
    JOIN posting_windows w ON w.id = p.posting_window_id

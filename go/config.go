@@ -9,6 +9,8 @@ import (
 type Config struct {
 	Region     string
 	DBHost     string
+	// ImageDBHost serves image bytes; when the new-image partition is UNLOGGED it must be the primary.
+	ImageDBHost string
 	DBPort     string
 	DBUser     string
 	DBPassword string
@@ -22,6 +24,7 @@ func ConfigFromEnv() *Config {
 	return &Config{
 		Region:       envOrDefault("ISUREAL_REGION", "asia"),
 		DBHost:       envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
+		ImageDBHost:  envOrDefault("ISUREAL_IMAGE_DB_HOST", ""),
 		DBPort:       envOrDefault("ISUREAL_DB_PORT", "5432"),
 		DBUser:       envOrDefault("ISUREAL_DB_USER", "isureal"),
 		DBPassword:   envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
@@ -33,6 +36,18 @@ func ConfigFromEnv() *Config {
 
 func (c *Config) DatabaseDSN() string {
 	return c.dsn(c.ApplyBarrier, "local")
+}
+
+// ImageDSN is the pool that reads image bytes. It points at the primary when
+// ISUREAL_IMAGE_DB_HOST is set (the new-image partition is UNLOGGED and
+// therefore not readable on standbys); otherwise it is the regular pool.
+func (c *Config) ImageDSN() string {
+	if c.ImageDBHost == "" || c.ImageDBHost == c.DBHost {
+		return ""
+	}
+	d := *c
+	d.DBHost = c.ImageDBHost
+	return d.dsn(true, "local")
 }
 
 // BarrierDSN is the pool used by the apply barrier; its commits wait for standby apply.

@@ -11,9 +11,11 @@ import (
 )
 
 type HandlerContext struct {
-	DB     *sqlx.DB
-	Config *Config
-	IPBans *IPBanList
+	DB *sqlx.DB
+	// ImageDB reads image bytes (primary when the new-image partition is UNLOGGED).
+	ImageDB *sqlx.DB
+	Config  *Config
+	IPBans  *IPBanList
 }
 
 func NewServer(config *Config) *echo.Echo {
@@ -38,10 +40,23 @@ func NewServer(config *Config) *echo.Echo {
 		panic("failed to ping database: " + err.Error())
 	}
 
+	imageDB := db
+	if dsn := config.ImageDSN(); dsn != "" {
+		imageDB, err = sqlx.Open("pgx", dsn)
+		if err != nil {
+			panic("failed to open image database: " + err.Error())
+		}
+		imageDB.SetMaxOpenConns(16)
+		imageDB.SetMaxIdleConns(16)
+		if err := imageDB.Ping(); err != nil {
+			panic("failed to ping image database: " + err.Error())
+		}
+	}
 	handlerContext := &HandlerContext{
-		DB:     db,
-		Config: config,
-		IPBans: &IPBanList{},
+		DB:      db,
+		ImageDB: imageDB,
+		Config:  config,
+		IPBans:  &IPBanList{},
 	}
 	e.Use(IPBanMiddleware(handlerContext))
 	if config.ApplyBarrier {

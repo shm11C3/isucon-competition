@@ -70,7 +70,7 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 			Data      []byte `db:"data"`
 			MediaType string `db:"media_type"`
 		}
-		err = h.DB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1`, input.ImageID)
+		err = h.ImageDB.GetContext(ctx, &object, `SELECT data, media_type FROM image_objects WHERE id = $1`, input.ImageID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return NewAPIError(http.StatusForbidden, "image_forbidden")
 		}
