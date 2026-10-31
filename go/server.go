@@ -40,6 +40,8 @@ func NewServer(config *Config) *echo.Echo {
 		panic("failed to ping database: " + err.Error())
 	}
 
+	startResetEpochPoller(db)
+
 	handlerContext := &HandlerContext{
 		DB:         db,
 		Config:     config,

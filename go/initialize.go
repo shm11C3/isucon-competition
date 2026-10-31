@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/labstack/echo/v5"
 )
@@ -29,6 +30,12 @@ func initializeHandler(h *HandlerContext) echo.HandlerFunc {
 				return err
 			}
 		}
+		if err := writeResetEpoch(c.Request().Context(), h.DB); err != nil {
+			return err
+		}
+		resetAppCaches()
+		// Other processes see the epoch through their replica on the next poll.
+		time.Sleep(2*resetEpochPollInterval + 100*time.Millisecond)
 
 		// Set language to the implementation language.
 		// Agents optimizing this app: set agent, harness, and model to the names used.
