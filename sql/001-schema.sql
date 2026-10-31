@@ -203,8 +203,8 @@ CREATE INDEX comments_post_id ON comments(post_id);
 
 CREATE TABLE notifications (
   id varchar(36) PRIMARY KEY,
-  user_id varchar(36) NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  posting_window_id varchar(36) NOT NULL REFERENCES posting_windows(id) ON DELETE RESTRICT,
+  user_id varchar(36) NOT NULL,
+  posting_window_id varchar(36) NOT NULL,
   created_at timestamptz NOT NULL,
   UNIQUE(user_id,posting_window_id)
 );
