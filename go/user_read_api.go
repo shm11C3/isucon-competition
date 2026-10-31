@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v5"
 	"golang.org/x/text/cases"
@@ -23,7 +24,38 @@ type searchUsersResponse struct {
 	HasMore bool                       `json:"hasMore"`
 }
 
+const normalizeSearchTextCacheMaxEntries = 20000
+
+var normalizeSearchTextCache struct {
+	sync.RWMutex
+	values map[string]string
+}
+
 func normalizeSearchText(value string) string {
+	normalizeSearchTextCache.RLock()
+	normalized, ok := normalizeSearchTextCache.values[value]
+	normalizeSearchTextCache.RUnlock()
+	if ok {
+		return normalized
+	}
+
+	normalized = normalizeSearchTextUncached(value)
+	normalizeSearchTextCache.Lock()
+	defer normalizeSearchTextCache.Unlock()
+	if cached, ok := normalizeSearchTextCache.values[value]; ok {
+		return cached
+	}
+	if normalizeSearchTextCache.values == nil {
+		normalizeSearchTextCache.values = make(map[string]string)
+	}
+	if len(normalizeSearchTextCache.values) >= normalizeSearchTextCacheMaxEntries {
+		clear(normalizeSearchTextCache.values)
+	}
+	normalizeSearchTextCache.values[value] = normalized
+	return normalized
+}
+
+func normalizeSearchTextUncached(value string) string {
 	return norm.NFC.String(cases.Fold().String(norm.NFC.String(value)))
 }
 
