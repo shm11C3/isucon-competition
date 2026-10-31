@@ -68,8 +68,10 @@ CREATE TABLE image_objects_default PARTITION OF image_objects DEFAULT;
 CREATE TABLE users (
   id varchar(36) PRIMARY KEY,
   username varchar(64) NOT NULL,
+  search_username text,
   secret_key_hash text NOT NULL,
   display_name text NOT NULL,
+  search_display_name text,
   bio text NOT NULL DEFAULT '',
   profile_image_id varchar(36),
   -- america/europe/asia
