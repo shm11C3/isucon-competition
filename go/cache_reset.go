@@ -24,7 +24,9 @@ func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
 	}
 	// Refill the (now empty) image cache from the reset database in the
 	// background; the initialize response does not wait for it.
-	startImagePreload(h.DB)
+	if h.Config != nil && h.Config.ImagePreload {
+		startImagePreload(h.DB)
+	}
 	return nil
 }
 
