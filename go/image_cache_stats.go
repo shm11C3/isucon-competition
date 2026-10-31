@@ -9,6 +9,24 @@ import (
 
 // Uses only the existing optional debug listener, never the application router.
 func init() {
+	http.HandleFunc("/debug/image-signature-cache-stats", func(w http.ResponseWriter, r *http.Request) {
+		imageSignatures.RLock()
+		snapshot := struct {
+			PID             int       `json:"pid"`
+			CapturedAt      time.Time `json:"captured_at"`
+			CapacityEntries int       `json:"capacity_entries"`
+			Entries         int       `json:"entries"`
+			Calculations    uint64    `json:"calculations"`
+			CapacityResets  uint64    `json:"capacity_resets"`
+			EvictedEntries  uint64    `json:"evicted_entries"`
+		}{os.Getpid(), time.Now().UTC(), imageSignatureCacheMaxEntries,
+			len(imageSignatures.entries), imageSignatures.calculations,
+			imageSignatures.capacityResets, imageSignatures.evictedEntries}
+		imageSignatures.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(snapshot)
+	})
 	http.HandleFunc("/debug/image-cache-stats", func(w http.ResponseWriter, r *http.Request) {
 		imageCache.RLock()
 		snapshot := struct {

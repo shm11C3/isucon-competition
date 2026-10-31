@@ -122,7 +122,10 @@ type imageSignatureKey struct {
 
 var imageSignatures = struct {
 	sync.RWMutex
-	entries map[imageSignatureKey][]byte
+	entries        map[imageSignatureKey][]byte
+	calculations   uint64
+	capacityResets uint64
+	evictedEntries uint64
 }{entries: map[imageSignatureKey][]byte{}}
 
 var imageSignatureFlights singleflight.Group
@@ -151,7 +154,10 @@ func cachedImageSignatureWith(key []byte, imageID string, exp int64, calculate f
 
 		sig = calculate(key, imageID, exp)
 		imageSignatures.Lock()
+		imageSignatures.calculations++
 		if len(imageSignatures.entries) >= imageSignatureCacheMaxEntries {
+			imageSignatures.capacityResets++
+			imageSignatures.evictedEntries += uint64(len(imageSignatures.entries))
 			imageSignatures.entries = map[imageSignatureKey][]byte{}
 		}
 		imageSignatures.entries[cacheKey] = sig
