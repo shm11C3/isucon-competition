@@ -48,7 +48,8 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusBadRequest, "invalid_pagination")
 		}
 		ctx := c.Request().Context()
-		viewer, err := loadViewerContext(ctx, h.DB, GetSession(c).UserID)
+		includeSecondHop := input.Feed == "following" || ranked
+		viewer, err := loadViewerContextWithGraph(ctx, h.DB, GetSession(c).UserID, includeSecondHop)
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.JSON(http.StatusOK, getFeedResponse{Items: []feedItemResponse{}})
 		}

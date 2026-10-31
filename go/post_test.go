@@ -121,6 +121,18 @@ func TestViewerContextCombinedQuery(t *testing.T) {
 		if oldErr == nil && !reflect.DeepEqual(old, got) {
 			t.Errorf("%s: contexts differ\nformer=%#v\ncombined=%#v", viewerID, old, got)
 		}
+		firstHop, firstHopErr := loadViewerContextWithGraph(ctx, db, viewerID, false)
+		if !sameLoadError(oldErr, firstHopErr) {
+			t.Errorf("%s: first-hop context error differs: %v", viewerID, firstHopErr)
+		}
+		if oldErr == nil && firstHopErr == nil {
+			if !reflect.DeepEqual(firstHop.User, old.User) || firstHop.HasPostedToday != old.HasPostedToday || !reflect.DeepEqual(firstHop.Friends, old.Friends) || !reflect.DeepEqual(firstHop.Blocked, old.Blocked) {
+				t.Errorf("%s: first-hop fields differ from full context", viewerID)
+			}
+			if len(firstHop.FriendsOfFriends) != 0 || len(firstHop.MutualFriends) != 0 {
+				t.Errorf("%s: first-hop context unexpectedly contains second-hop graph", viewerID)
+			}
+		}
 		if viewerID == "viewer" && oldErr == nil && len(got.User.ImageKey) == 0 {
 			t.Error("setImageKey was not preserved")
 		}
