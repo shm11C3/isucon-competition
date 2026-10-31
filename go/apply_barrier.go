@@ -20,7 +20,7 @@ import (
 // batched onto a bounded number of concurrent barriers.
 
 const applyBarrierMaxConcurrent = 8
-const applyBarrierMinInterval = 10 * time.Millisecond
+const applyBarrierMinInterval = 30 * time.Millisecond
 const applyBarrierTimeout = 5 * time.Minute
 
 // applyBarrierSyncStandbys is how many standbys must be in sync state for a
