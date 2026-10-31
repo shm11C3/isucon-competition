@@ -13,6 +13,7 @@ import (
 )
 
 func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
+	stopImagePreload()
 	resetImageCache()
 	resetImageSignatures()
 	resetRecentImageKeys()

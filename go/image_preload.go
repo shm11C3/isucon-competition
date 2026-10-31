@@ -3,6 +3,7 @@ package isureal
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -70,9 +71,38 @@ func warmProfileImages(ctx context.Context, db *sqlx.DB) {
 	log.Printf("image preload: %d images, %d signatures in %s", loaded, signed, time.Since(started).Round(time.Millisecond))
 }
 
+// imagePreload keeps a single preload goroutine alive at a time so that a
+// reset never races an older preload re-inserting entries after the clear.
+var imagePreload struct {
+	sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func stopImagePreload() {
+	imagePreload.Lock()
+	cancel, done := imagePreload.cancel, imagePreload.done
+	imagePreload.cancel, imagePreload.done = nil, nil
+	imagePreload.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
+}
+
 func startImagePreload(db *sqlx.DB) {
+	stopImagePreload()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	done := make(chan struct{})
+	imagePreload.Lock()
+	imagePreload.cancel, imagePreload.done = cancel, done
+	imagePreload.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer close(done)
 		defer cancel()
 		warmProfileImages(ctx, db)
 	}()
