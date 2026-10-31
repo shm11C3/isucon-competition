@@ -1,0 +1,16 @@
+[Unit]
+Description=isureal-go regional POST /api/posts near the client, one DB call to the primary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/go
+EnvironmentFile=/home/isucon/env.sh
+ExecStart=/usr/bin/env GOMEMLIMIT=1000MiB ISUREAL_PORT=8084 /home/isucon/webapp/go/isureal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

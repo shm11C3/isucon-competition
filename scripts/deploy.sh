@@ -19,6 +19,8 @@ deploy() {
 		set -- isureal-go
 		if test "$(hostname)" = ip-192-168-1-10; then
 			set -- "$@" isureal-go-europe
+		elif systemctl is-enabled -q isureal-go-post 2>/dev/null; then
+			set -- "$@" isureal-go-post
 		fi
 		sudo systemctl restart "$@"
 		sleep 1
