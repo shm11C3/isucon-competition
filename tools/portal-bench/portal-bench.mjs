@@ -40,6 +40,8 @@ async function mismatch(ctx, page, why) {
 async function gotoJobs(ctx, page) {
   await page.goto(JOBS_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle').catch(() => {});
+  // ポータルのセッション切れはGitHub経由で自動再認証される。戻るまで待つ。
+  if (!onPortal(page)) await page.waitForURL((u) => u.origin === BASE && /\/contestant/.test(u.pathname), { timeout: 20000 }).catch(() => {});
   if (!onPortal(page)) { await ctx.close(); die(2, `未ログイン: まず \`node portal-bench.mjs login\` を人間が実行してください (現在URL: ${page.url()})`); }
 }
 
