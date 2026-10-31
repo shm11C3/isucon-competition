@@ -53,6 +53,7 @@ deploy_asia2() {
 		chmod +x isureal.new
 		mv isureal.new isureal
 		sudo systemctl restart isureal-go-america; if systemctl is-enabled -q isureal-go-europe 2>/dev/null; then sudo systemctl restart isureal-go-europe; fi
+		if systemctl is-enabled -q isureal-go-asia-post 2>/dev/null; then sudo systemctl restart isureal-go-asia-post; fi
 		sleep 1
 		systemctl is-active isureal-go-america
 		printf "host=%s binary_sha256=" "$(hostname)"
