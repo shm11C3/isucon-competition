@@ -17,6 +17,9 @@ deploy() {
 		mv isureal.new isureal
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
 		set -- isureal-go
+		if systemctl is-enabled --quiet isureal-go-asia-offload 2>/dev/null; then
+			set -- "$@" isureal-go-asia-offload
+		fi
 		if test "$(hostname)" = ip-192-168-1-10; then
 			if systemctl is-enabled -q isureal-go-europe 2>/dev/null; then
 				set -- "$@" isureal-go-europe
