@@ -26,7 +26,11 @@
 - 各 Go unit の drop-in `90-eaa-cache-stats.conf` は `/etc/isureal-pprof/<unit>.env`（`ISUREAL_PPROF=127.0.0.1:606x`、ローカル pprof ポートのみ）を読む。挙動に影響なし
 - 無効のまま: asia1 `isureal-go-asia-reads`、asia2 `isureal-go-europe`、america1 `isureal-go-asia-offload` / `isureal-go-asia-post`、asia1 の残骸 PostgreSQL（`start.conf=manual`）
 
-## 再起動ドリル（17:30 まで）
+## 再起動ドリル結果（16:46 実施・合格）
+
+4 台 + ルーター同時 reboot 後、全 unit 自動復帰、standby 2 台 streaming/sync、envcheck 4 台パス、image store 1133 ファイル、DB 件数一致、ルーター 200/401、4 台から 192.168.10.10:8080/443 → 000、OOM 0、avail 3.1GB 以上。
+
+## 再起動ドリル手順（再実施が必要な場合）
 
 1. 最終版を deploy し、1 走 PASS を確認してから着手。
 2. 4 台 + ルーターを AWS API で同時 reboot（`i-00b0826900879795e i-05de0272691b934b0 i-0af3fb3b61a0bd419 i-0210419da00423cc9 i-064eab2e491223cd0`）。
