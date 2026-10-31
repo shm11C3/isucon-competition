@@ -17,6 +17,7 @@ const BUSY_RE = /\b(WAITING|PENDING|RUNNING)\b/;
 const POLL_MS = 5000, TIMEOUT_MS = 5 * 60 * 1000;
 // -------------------------------------------------------
 const PROFILE = path.join(os.homedir(), '.config/isu-portal/profile');
+const COOKIE_FILE = path.join(os.homedir(), '.config/isu-portal/portal-cookies.json');
 const [cmd, ...rest] = process.argv.slice(2);
 
 const die = (code, msg) => { console.error(msg); process.exit(code); };
@@ -24,6 +25,14 @@ const die = (code, msg) => { console.error(msg); process.exit(code); };
 async function open(headless) {
   fs.mkdirSync(PROFILE, { recursive: true });
   const ctx = await chromium.launchPersistentContext(PROFILE, { headless });
+  // ポータルのCookieはsession cookieで終了時に消える。再OAuthが続くとGitHubに止められるので保存する。
+  if (fs.existsSync(COOKIE_FILE)) await ctx.addCookies(JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf8')));
+  const close = ctx.close.bind(ctx);
+  ctx.close = async () => {
+    const cookies = await ctx.cookies(BASE).catch(() => []);
+    if (cookies.length) fs.writeFileSync(COOKIE_FILE, JSON.stringify(cookies.map((c) => ({ ...c, expires: Math.floor(Date.now() / 1000) + 86400 }))), { mode: 0o600 });
+    await close();
+  };
   const page = ctx.pages()[0] ?? await ctx.newPage();
   return { ctx, page };
 }
