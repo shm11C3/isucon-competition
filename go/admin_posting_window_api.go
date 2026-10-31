@@ -43,7 +43,13 @@ func openPostingWindowHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		defer tx.Rollback()
-		if _, err := tx.ExecContext(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		// Serialize windows within a region without serializing other regions.
+		regionLockID := map[string]int{"asia": 1, "europe": 2, "america": 3}[region]
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(20261031, $1)`, regionLockID); err != nil {
+			return err
+		}
+		// Keep registration and user changes out of the notification snapshot.
+		if _, err := tx.ExecContext(ctx, `LOCK TABLE users IN SHARE MODE`); err != nil {
 			return err
 		}
 		var conflict bool
