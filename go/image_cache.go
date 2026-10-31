@@ -17,8 +17,12 @@ type cachedImage struct {
 
 var imageCache = struct {
 	sync.RWMutex
-	entries map[string]*cachedImage
-	bytes   int
+	entries        map[string]*cachedImage
+	bytes          int
+	capacityResets uint64
+	evictedBytes   uint64
+	insertions     uint64
+	insertedBytes  uint64
 }{entries: map[string]*cachedImage{}}
 
 func getCachedImage(id string) *cachedImage {
@@ -31,12 +35,16 @@ func putCachedImage(id string, image *cachedImage) {
 	imageCache.Lock()
 	defer imageCache.Unlock()
 	if imageCache.bytes+len(image.data) > imageCacheMaxBytes {
+		imageCache.capacityResets++
+		imageCache.evictedBytes += uint64(imageCache.bytes)
 		imageCache.entries = map[string]*cachedImage{}
 		imageCache.bytes = 0
 	}
 	if _, ok := imageCache.entries[id]; !ok {
 		imageCache.bytes += len(image.data)
 	}
+	imageCache.insertions++
+	imageCache.insertedBytes += uint64(len(image.data))
 	imageCache.entries[id] = image
 }
 
