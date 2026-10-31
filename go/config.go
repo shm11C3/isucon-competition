@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -22,6 +23,9 @@ type Config struct {
 	ImageCachePeerURL string
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
+	// DBMaxOpen caps the main pool per process so the sum over all processes
+	// stays under the primary's max_connections.
+	DBMaxOpen int
 }
 
 func ConfigFromEnv() *Config {
@@ -38,6 +42,7 @@ func ConfigFromEnv() *Config {
 		ImageStoreToken:   envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
 		ImageCachePeerURL: envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
 		ApplyBarrier:      envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
+		DBMaxOpen:         envIntOrDefault("ISUREAL_DB_MAX_OPEN", 30),
 	}
 }
 
@@ -68,6 +73,15 @@ func (c *Config) dsn(setSyncCommit bool, syncCommit string) string {
 func envOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func envIntOrDefault(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n > 0 {
+			return n
+		}
 	}
 	return defaultValue
 }
