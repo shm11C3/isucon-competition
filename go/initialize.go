@@ -35,6 +35,11 @@ func initializeHandler(h *HandlerContext) echo.HandlerFunc {
 		if err := resetPeerCaches(c.Request().Context(), h.Config.ImageCacheResetPeerURLs, h.Config.ImageStoreToken); err != nil {
 			return err
 		}
+		// Distributed deployments include self in the peer list and start the
+		// preload through that reset endpoint. Only standalone mode starts here.
+		if len(h.Config.ImageCacheResetPeerURLs) == 0 && h.Config.ImagePreload {
+			startImagePreload(h.DB)
+		}
 
 		// Set language to the implementation language.
 		// Agents optimizing this app: set agent, harness, and model to the names used.

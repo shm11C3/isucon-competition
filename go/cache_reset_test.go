@@ -68,6 +68,9 @@ func TestCacheResetRouteAuthenticationAndClear(t *testing.T) {
 }
 
 func TestResetPeerCachesWaitsAndChecksStatus(t *testing.T) {
+	if err := resetPeerCaches(context.Background(), nil, "secret"); err == nil {
+		t.Fatal("configured image store must not silently skip all peers")
+	}
 	hit := false
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		hit = true

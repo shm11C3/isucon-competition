@@ -12,6 +12,9 @@ import (
 )
 
 func resetLocalCaches(ctx context.Context, h *HandlerContext) error {
+	profileImagePreloader.Lock()
+	defer profileImagePreloader.Unlock()
+	profileImagePreloader.stopLocked()
 	resetImageCache()
 	resetImageSignatures()
 	resetRecentImageKeys()
@@ -33,6 +36,9 @@ func registerCacheResetRoute(e *echo.Echo, token string, h *HandlerContext) {
 		if err := resetLocalCaches(c.Request().Context(), h); err != nil {
 			return err
 		}
+		if h.Config != nil && h.Config.ImagePreload {
+			startImagePreload(h.DB)
+		}
 		c.Logger().Info("cache reset complete")
 		return c.NoContent(http.StatusNoContent)
 	})
@@ -43,6 +49,9 @@ func resetPeerCaches(ctx context.Context, urls []string, token string) error {
 }
 
 func resetPeerCachesWithClient(ctx context.Context, urls []string, token string, client *http.Client) error {
+	if token != "" && len(urls) == 0 {
+		return fmt.Errorf("cache reset peers missing for configured image store")
+	}
 	for _, baseURL := range urls {
 		baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 		if baseURL == "" {
