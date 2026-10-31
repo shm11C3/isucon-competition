@@ -1,13 +1,14 @@
 [Unit]
-Description=T-0075: larger initial TCP window on the default route (new connections to other regions)
+Description=T-0075: larger initial TCP window on inter-region routes and the default route
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Re-applies the current default route with initcwnd/initrwnd 64 (~93 KB);
-# the route itself (gateway, device, metric) is taken from the live table.
-ExecStart=/bin/sh -c 'r=$(ip -4 route show default | head -1); [ -n "$r" ] && ip route change $r initcwnd 64 initrwnd 64'
+# Inter-region traffic uses the per-region routes via the router (192.168.10.10),
+# not only the default route, so every such route gets initcwnd/initrwnd 64
+# (~93 KB). Each route line is re-applied as shown by the live table.
+ExecStart=/bin/sh -c 'ip -4 route show | grep -E "via 192\.168\.10\.10|^default" | grep -v initcwnd | while read -r r; do ip route change $r initcwnd 64 initrwnd 64; done; ip -4 route show | grep -E "via 192\.168\.10\.10|^default"'
 RemainAfterExit=yes
 
 [Install]
