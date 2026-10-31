@@ -44,6 +44,13 @@ func NewServer(config *Config) *echo.Echo {
 		IPBans: &IPBanList{},
 	}
 	e.Use(IPBanMiddleware(handlerContext))
+	if config.ApplyBarrier {
+		barrier, err := newApplyBarrier(config.BarrierDSN())
+		if err != nil {
+			panic("failed to open barrier database pool: " + err.Error())
+		}
+		e.Use(ApplyBarrierMiddleware(barrier))
+	}
 
 	e.POST("/api/initialize", initializeHandler(handlerContext))
 	e.POST("/api/auth/register", registerHandler(handlerContext))
