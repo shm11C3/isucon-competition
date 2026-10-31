@@ -7,7 +7,11 @@ import "example.com/isureal-company/isureal"
 func main() {
 	config := isureal.ConfigFromEnv()
 	server := isureal.NewServer(config)
-	if err := server.Start(":8080"); err != nil {
+	port := os.Getenv("ISUREAL_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	if err := server.Start(":" + port); err != nil {
 		panic("failed to start server: " + err.Error())
 	}
 }

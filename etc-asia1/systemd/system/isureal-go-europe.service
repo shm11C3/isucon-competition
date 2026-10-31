@@ -1,0 +1,18 @@
+[Unit]
+Description=isureal-go for europe users
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/go
+EnvironmentFile=/home/isucon/env.sh
+Environment=ISUREAL_REGION=europe
+Environment=ISUREAL_PORT=8081
+ExecStart=/home/isucon/webapp/go/isureal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

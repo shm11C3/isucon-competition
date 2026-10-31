@@ -16,7 +16,7 @@ deploy() {
 		PATH=$HOME/local/go/bin:$PATH go build -o isureal.new cmd/isureal/main.go
 		mv isureal.new isureal
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
-		sudo systemctl restart isureal-go
+		sudo systemctl restart "isureal-go*"
 		sleep 1
 		systemctl is-active isureal-go
 		printf "host=%s binary_sha256=" "$(hostname)"
