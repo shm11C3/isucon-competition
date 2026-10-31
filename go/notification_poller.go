@@ -9,7 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const notificationPollInterval = 500 * time.Millisecond
+const notificationPollInterval = 100 * time.Millisecond
 
 // activeWindowGenerations maps a region to its open posting window. One poller
 // per process lets idle SSE connections skip their per-user queries.
