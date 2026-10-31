@@ -147,7 +147,7 @@ func loginHandler(h *HandlerContext) echo.HandlerFunc {
 		if user.Status != "active" || user.SecretKeyHash != hex.EncodeToString(hash[:]) {
 			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
 		}
-		session, err := createLoginSessionTx(ctx, tx, user.ID)
+		session, err := createLoginSessionForLockedUserTx(ctx, tx, user.ID)
 		if err != nil {
 			return err
 		}
@@ -210,26 +210,30 @@ func updateMeHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		defer tx.Rollback()
+		var searchName *string
 		if input.DisplayName != nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET display_name = $2, search_display_name = $3, updated_at = clock_timestamp() WHERE id = $1`, session.UserID, *input.DisplayName, normalizeSearchText(*input.DisplayName)); err != nil {
-				return err
-			}
+			normalized := normalizeSearchText(*input.DisplayName)
+			searchName = &normalized
 		}
-		if input.Bio != nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET bio = $2, updated_at = clock_timestamp() WHERE id = $1`, session.UserID, *input.Bio); err != nil {
-				return err
-			}
-		}
-		if input.Region != nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET region = $2, updated_at = clock_timestamp() WHERE id = $1`, session.UserID, *input.Region); err != nil {
-				return err
-			}
-		}
-		user, err := getUser(ctx, tx, session.UserID)
+		var user User
+		err = tx.GetContext(ctx, &user, `
+   UPDATE users SET
+     display_name = COALESCE($2, display_name),
+     search_display_name = COALESCE($3, search_display_name),
+     bio = COALESCE($4, bio),
+     region = COALESCE($5, region),
+     updated_at = clock_timestamp()
+   WHERE id = $1 AND status = 'active'
+   RETURNING id, username, secret_key_hash, display_name, bio,
+             profile_image_id, region, account_type, status
+  `, session.UserID, input.DisplayName, searchName, input.Bio, input.Region)
 		if errors.Is(err, sql.ErrNoRows) {
 			return NewAPIError(http.StatusNotFound, "account_not_found")
 		}
 		if err != nil {
+			return err
+		}
+		if err := user.setImageKey(); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
