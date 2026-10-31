@@ -117,6 +117,9 @@ func loginHandler(h *HandlerContext) echo.HandlerFunc {
 		ctx := c.Request().Context()
 		hash := sha256.Sum256([]byte(input.SecretKey))
 		// 認証失敗はロックもトランザクションも取らずに返す。
+		if known, ok := loginRejectCache.get(input.Username); ok && known != hex.EncodeToString(hash[:]) {
+			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
+		}
 		var candidate struct {
 			SecretKeyHash string `db:"secret_key_hash"`
 			Status        string `db:"status"`
@@ -128,6 +131,7 @@ func loginHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		loginRejectCache.put(input.Username, candidate.SecretKeyHash)
 		if candidate.Status != "active" || candidate.SecretKeyHash != hex.EncodeToString(hash[:]) {
 			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
 		}
