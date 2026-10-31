@@ -16,13 +16,16 @@ deploy() {
 		PATH=$HOME/local/go/bin:$PATH go build -o isureal.new cmd/isureal/main.go
 		mv isureal.new isureal
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
-		sudo systemctl restart isureal-go; test "$(hostname)" != ip-192-168-1-10 || sudo systemctl restart isureal-go-europe isureal-go-america
+		sudo systemctl restart isureal-go; test "$(hostname)" != ip-192-168-1-10 || sudo systemctl restart isureal-go-europe
 		sleep 1
 		systemctl is-active isureal-go
 		printf "host=%s binary_sha256=" "$(hostname)"
 		sha256sum isureal'
 }
 hosts=(asia1 europe1 america1)
+deploy_asia2() {
+	ssh -F "$CFG" -o BatchMode=yes asia1 'cat ~/webapp/go/isureal' | ssh -F "$CFG" -o BatchMode=yes asia2 'mkdir -p ~/webapp/go && cat > ~/webapp/go/isureal.new && chmod +x ~/webapp/go/isureal.new && mv ~/webapp/go/isureal.new ~/webapp/go/isureal && sudo systemctl restart isureal-go-america && sleep 1 && systemctl is-active isureal-go-america'
+}
 pids=()
 for h in "${hosts[@]}"; do
 	deploy "$h" &
@@ -42,4 +45,5 @@ done
 if test "$failed" -ne 0; then
 	exit 1
 fi
+deploy_asia2
 printf '%s\n' "$checkout_sha"
