@@ -55,7 +55,7 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		if !ranked && !viewer.HasPostedToday {
+		if !viewer.HasPostedToday {
 			return c.JSON(http.StatusOK, getFeedResponse{Items: []feedItemResponse{}})
 		}
 		following := map[string]bool{}
@@ -68,41 +68,28 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 				following[id] = true
 			}
 		}
-		beforePostedAt, beforeID := input.BeforePostedAt, input.BeforeID
+		var candidates []PostWithAuthor
+		var scores map[string]int64
 		if ranked {
-			beforePostedAt, beforeID = nil, ""
-		}
-		var posts []PostWithAuthor
-		if ranked {
-			posts, err = selectPostsWithAuthor(ctx, h.DB, `
-   AND p.author_id <> $1 AND w.ended_at IS NULL
-   AND ($2::timestamptz IS NULL OR (p.posted_at, p.id) < ($2, $3))
-   ORDER BY p.posted_at DESC, p.id DESC
-  `, viewer.ID, beforePostedAt, beforeID)
+			candidates, scores, err = selectRankedFeedWithScore(ctx, h.DB, viewer, input)
 		} else {
-			conditions, args, queryErr := nonRankedFeedQuery(viewer, following, input, beforePostedAt, beforeID)
+			conditions, args, queryErr := nonRankedFeedQuery(viewer, following, input, input.BeforePostedAt, input.BeforeID)
 			if queryErr != nil {
 				return queryErr
 			}
+			var posts []PostWithAuthor
 			posts, err = selectPostsWithAuthor(ctx, h.DB, conditions, args...)
+			if err == nil {
+				candidates = make([]PostWithAuthor, 0, len(posts))
+				for _, post := range posts {
+					if viewer.canView(post.Post) && matchesFeed(viewer, following, post.Post, input.Feed) {
+						candidates = append(candidates, post)
+					}
+				}
+			}
 		}
 		if err != nil {
 			return err
-		}
-		candidates := make([]PostWithAuthor, 0)
-		for _, post := range posts {
-			if viewer.canView(post.Post) && matchesFeed(viewer, following, post.Post, input.Feed) {
-				candidates = append(candidates, post)
-			}
-		}
-		var scores map[string]int64
-		if ranked {
-			if scores, err = recommendationScores(ctx, h.DB, viewer, candidates); err != nil {
-				return err
-			}
-			sort.SliceStable(candidates, func(i, j int) bool {
-				return scores[candidates[i].ID] > scores[candidates[j].ID]
-			})
 		}
 		items := make([]feedItemResponse, 0)
 		for _, post := range candidates {
@@ -125,6 +112,131 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 		return c.JSON(http.StatusOK, getFeedResponse{Items: items, HasMore: hasMore})
 	}
+}
+
+type rankedPostWithScore struct {
+	PostWithAuthor
+	Score int64 `db:"score"`
+}
+
+func selectRankedFeedWithScore(ctx context.Context, db sqlx.QueryerContext, viewer viewerContext, input getFeedRequest) ([]PostWithAuthor, map[string]int64, error) {
+	query, args := rankedFeedQuery(viewer, input)
+	var rows []rankedPostWithScore
+	if err := sqlx.SelectContext(ctx, db, &rows, query, args...); err != nil {
+		return nil, nil, err
+	}
+	posts := make([]PostWithAuthor, len(rows))
+	scores := make(map[string]int64, len(rows))
+	for i, row := range rows {
+		if err := row.Author.setImageKey(); err != nil {
+			return nil, nil, err
+		}
+		posts[i] = row.PostWithAuthor
+		scores[row.ID] = row.Score
+	}
+	return posts, scores, nil
+}
+
+func rankedFeedQuery(viewer viewerContext, input getFeedRequest) (string, []any) {
+	friendIDs := sortedMapIDs(viewer.Friends)
+	fofIDs := sortedMapIDs(viewer.FriendsOfFriends)
+	blockedIDs := sortedMapIDs(viewer.Blocked)
+	mutualIDs, mutualCounts := sortedMutualCountArrays(viewer.MutualFriends)
+
+	query := `
+WITH candidate_posts AS MATERIALIZED (
+  SELECT p.id, p.author_id, p.posted_at
+  FROM posts p
+  JOIN posting_windows w ON w.id = p.posting_window_id
+  JOIN users u ON u.id = p.author_id AND u.status = 'active'
+  WHERE p.deleted_at IS NULL AND p.author_id <> $1 AND w.ended_at IS NULL
+    AND $10::boolean
+    AND p.author_id = ANY($2::text[])
+    AND NOT (p.author_id = ANY($3::text[]))
+    AND NOT (p.author_id = ANY($4::text[]))
+    AND p.visibility IN ('public', 'friends_of_friends')
+),
+candidate_authors AS MATERIALIZED (
+  SELECT DISTINCT author_id FROM candidate_posts
+),
+mutual_counts AS MATERIALIZED (
+  SELECT m.user_id, m.mutual_count
+  FROM unnest($5::text[], $6::bigint[]) AS m(user_id, mutual_count)
+),
+author_edges AS (
+  SELECT f.user_low_id AS author_id, f.user_high_id AS other_id
+  FROM friendships f
+  JOIN candidate_authors ca ON ca.author_id = f.user_low_id
+  UNION ALL
+  SELECT f.user_high_id AS author_id, f.user_low_id AS other_id
+  FROM friendships f
+  JOIN candidate_authors ca ON ca.author_id = f.user_high_id
+),
+connections AS (
+  SELECT e.author_id, SUM(COALESCE(m.mutual_count, 0)) AS mutual_connections
+  FROM author_edges e
+  JOIN mutual_counts m ON m.user_id = e.other_id
+  GROUP BY e.author_id
+),
+engagements AS (
+  SELECT r.post_id, r.reactor_id AS user_id
+  FROM realmojis r
+  JOIN candidate_posts cp ON cp.id = r.post_id
+  JOIN users u ON u.id = r.reactor_id AND u.status = 'active'
+  WHERE r.reactor_id = ANY($3::text[]) AND r.replaced_at IS NULL AND r.deleted_at IS NULL
+  UNION
+  SELECT c.post_id, c.author_id AS user_id
+  FROM comments c
+  JOIN candidate_posts cp ON cp.id = c.post_id
+  JOIN users u ON u.id = c.author_id AND u.status = 'active'
+  WHERE c.author_id = ANY($3::text[]) AND c.deleted_at IS NULL
+),
+friend_engagements AS (
+  SELECT e.post_id, COUNT(*) AS engagement_count
+  FROM engagements e
+  GROUP BY e.post_id
+),
+scored_candidates AS (
+  SELECT cp.id, cp.author_id, cp.posted_at,
+         10 * COALESCE(fe.engagement_count, 0)
+           + 3 * COALESCE(author_mutual.mutual_count, 0)
+           + LEAST(COALESCE(c.mutual_connections, 0), 30)::bigint AS score
+  FROM candidate_posts cp
+  LEFT JOIN friend_engagements fe ON fe.post_id = cp.id
+  LEFT JOIN connections c ON c.author_id = cp.author_id
+  LEFT JOIN mutual_counts author_mutual ON author_mutual.user_id = cp.author_id
+),
+page AS MATERIALIZED (
+  SELECT * FROM scored_candidates
+  WHERE ($7::bigint IS NULL OR (score, posted_at, id) < ($7, $8, $9))
+  ORDER BY score DESC, posted_at DESC, id DESC
+  LIMIT 51
+)
+SELECT ` + postColumns + `, ` + userColumnsAs("u", "author") + `, page.score
+FROM page
+JOIN posts p ON p.id = page.id
+JOIN posting_windows w ON w.id = p.posting_window_id
+JOIN users u ON u.id = p.author_id AND u.status = 'active'
+ORDER BY page.score DESC, page.posted_at DESC, page.id DESC
+`
+	args := []any{
+		viewer.ID, fofIDs, friendIDs, blockedIDs, mutualIDs, mutualCounts,
+		input.BeforeScore, input.BeforePostedAt, input.BeforeID, viewer.HasPostedToday,
+	}
+	return query, args
+}
+
+func sortedMutualCountArrays(values map[string]int) ([]string, []int64) {
+	ids := make([]string, 0, len(values))
+	for id := range values {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	counts := make([]int64, len(ids))
+	for i, id := range ids {
+		counts[i] = int64(values[id])
+	}
+	return ids, counts
 }
 
 func nonRankedFeedQuery(viewer viewerContext, following map[string]bool, input getFeedRequest, beforePostedAt *time.Time, beforeID string) (string, []any, error) {

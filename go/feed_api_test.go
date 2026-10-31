@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +141,35 @@ func TestNonRankedFeedQueryTextStableForArrayLengths(t *testing.T) {
 					t.Errorf("%s arg %d is not a non-nil []string: %#v", feed, index, args[index])
 				}
 			}
+		}
+	}
+}
+
+func TestRankedFeedQueryTextStableForArrayLengths(t *testing.T) {
+	empty := viewerContext{User: User{ID: "viewer"}, Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, Blocked: map[string]bool{}, MutualFriends: map[string]int{}}
+	populated := viewerContext{
+		User:             User{ID: "viewer"},
+		Friends:          map[string]bool{"friend-a": true, "friend-b": true},
+		FriendsOfFriends: map[string]bool{"fof-a": true, "fof-b": true},
+		Blocked:          map[string]bool{"blocked": true},
+		MutualFriends:    map[string]int{"friend-a": 2, "fof-a": 3},
+	}
+	input := getFeedRequest{Feed: "friends-of-friends"}
+	queryEmpty, argsEmpty := rankedFeedQuery(empty, input)
+	queryPopulated, argsPopulated := rankedFeedQuery(populated, input)
+	if queryEmpty != queryPopulated || len(argsEmpty) != len(argsPopulated) {
+		t.Fatal("ranked query shape changed with snapshot array cardinality")
+	}
+	for _, args := range [][]any{argsEmpty, argsPopulated} {
+		for _, index := range []int{1, 2, 3, 4} {
+			ids, ok := args[index].([]string)
+			if !ok || ids == nil {
+				t.Errorf("arg %d is not a non-nil []string: %#v", index, args[index])
+			}
+		}
+		counts, ok := args[5].([]int64)
+		if !ok || counts == nil {
+			t.Errorf("mutual-count arg is not a non-nil []int64: %#v", args[5])
 		}
 	}
 }
@@ -295,6 +326,235 @@ func recommendationScoresWithIN(ctx context.Context, db sqlx.QueryerContext, vie
 		scores[post.ID] = 10*friendEngagements[post.ID] + 3*int64(viewer.MutualFriends[post.AuthorID]) + min(connections[post.AuthorID], 30)
 	}
 	return scores, nil
+}
+
+func TestRankedFeedQueryMatchesGoOracle(t *testing.T) {
+	dsn := os.Getenv("T0012_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set T0012_TEST_DSN to run the PostgreSQL ranked feed comparison")
+	}
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	conn, err := db.Connx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, statement := range []string{
+		`CREATE TEMP TABLE users (id text PRIMARY KEY, username text NOT NULL, secret_key_hash text NOT NULL, display_name text NOT NULL, bio text NOT NULL, profile_image_id text, region text NOT NULL, account_type text NOT NULL, status text NOT NULL)`,
+		`CREATE TEMP TABLE posting_windows (id text PRIMARY KEY, on_time_deadline timestamptz NOT NULL, ended_at timestamptz)`,
+		`CREATE TEMP TABLE posts (id text PRIMARY KEY, author_id text NOT NULL, posting_window_id text NOT NULL, image_id text NOT NULL, caption text NOT NULL, visibility text NOT NULL, location_kind text NOT NULL, latitude numeric, longitude numeric, locality text, posted_at timestamptz NOT NULL, deleted_at timestamptz)`,
+		`CREATE TEMP TABLE friendships (user_low_id text NOT NULL, user_high_id text NOT NULL)`,
+		`CREATE TEMP TABLE realmojis (post_id text NOT NULL, reactor_id text NOT NULL, replaced_at timestamptz, deleted_at timestamptz)`,
+		`CREATE TEMP TABLE comments (post_id text NOT NULL, author_id text NOT NULL, deleted_at timestamptz)`,
+	} {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const secretHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, user := range []struct{ id, status string }{
+		{"viewer", "active"}, {"friend-a", "active"}, {"friend-b", "active"},
+		{"fof-a", "active"}, {"fof-b", "active"}, {"blocked-a", "active"},
+		{"blocked-b", "active"}, {"direct", "active"}, {"unrelated", "active"},
+		{"inactive", "deleted"}, {"stranger", "active"}, {"nonfriend-engager", "active"},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO users VALUES ($1,$1,$2,$1,'',NULL,'america','regular',$3)`, user.id, secretHash, user.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	baseTime := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	if _, err := conn.ExecContext(ctx, `INSERT INTO posting_windows VALUES ('active',$1,NULL),('ended',$1,$1)`, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	insertPost := func(id, author, visibility, window string, postedAt time.Time, deleted any) {
+		t.Helper()
+		if _, err := conn.ExecContext(ctx, `INSERT INTO posts VALUES ($1,$2,$3,$4,'',$5,'none',NULL,NULL,NULL,$6,$7)`, id, author, window, "image-"+id, visibility, postedAt, deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 120; i++ {
+		author, visibility := "fof-a", "public"
+		if i%2 == 0 {
+			author = "fof-b"
+		}
+		if i%3 == 0 {
+			visibility = "friends_of_friends"
+		}
+		window := "active"
+		var deleted any
+		if i%40 == 0 {
+			window = "ended"
+		}
+		if i%37 == 0 {
+			deleted = baseTime
+		}
+		insertPost(fmt.Sprintf("rank-%03d", i), author, visibility, window, baseTime.Add(-time.Duration(i/4)*time.Minute), deleted)
+	}
+	insertPost("public-unrelated", "unrelated", "public", "active", baseTime.Add(time.Hour), nil)
+	insertPost("public-direct-friend", "direct", "public", "active", baseTime.Add(time.Hour), nil)
+	insertPost("fof-direct-private", "direct", "friends_of_friends", "active", baseTime.Add(time.Hour), nil)
+	insertPost("fof-friends-private", "fof-a", "friends", "active", baseTime.Add(time.Hour), nil)
+	insertPost("fof-invalid-visibility", "fof-a", "unknown", "active", baseTime.Add(time.Hour), nil)
+	insertPost("blocked-outgoing", "blocked-a", "public", "active", baseTime.Add(time.Hour), nil)
+	insertPost("blocked-incoming", "blocked-b", "friends_of_friends", "active", baseTime.Add(time.Hour), nil)
+	insertPost("inactive-author", "inactive", "public", "active", baseTime.Add(time.Hour), nil)
+	insertPost("ended-author", "fof-a", "public", "ended", baseTime.Add(time.Hour), nil)
+	insertPost("deleted-author", "fof-a", "public", "active", baseTime.Add(time.Hour), baseTime)
+	insertPost("own-author", "viewer", "public", "active", baseTime.Add(time.Hour), nil)
+	for _, edge := range [][2]string{
+		{"fof-a", "friend-a"}, {"friend-b", "fof-a"}, {"fof-a", "fof-b"},
+		{"fof-b", "common"}, {"fof-b", "fof-b"}, {"unrelated-a", "unrelated-b"},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO friendships VALUES ($1,$2)`, edge[0], edge[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, engagement := range []struct {
+		post, user        string
+		replaced, deleted any
+	}{
+		{"rank-001", "friend-a", nil, nil}, {"rank-001", "friend-b", nil, nil},
+		{"rank-001", "friend-a", nil, nil}, {"rank-001", "nonfriend-engager", nil, nil},
+		{"rank-001", "inactive", nil, nil}, {"rank-001", "friend-a", baseTime, nil},
+		{"rank-001", "friend-b", nil, baseTime}, {"rank-002", "friend-a", nil, nil},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO realmojis VALUES ($1,$2,$3,$4)`, engagement.post, engagement.user, engagement.replaced, engagement.deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, comment := range []struct {
+		post, user string
+		deleted    any
+	}{
+		{"rank-001", "friend-a", nil}, {"rank-001", "nonfriend-engager", nil},
+		{"rank-001", "inactive", nil}, {"rank-002", "friend-a", nil},
+		{"rank-002", "friend-b", baseTime},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO comments VALUES ($1,$2,$3)`, comment.post, comment.user, comment.deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	viewer := viewerContext{
+		User:             User{ID: "viewer"},
+		HasPostedToday:   true,
+		Friends:          map[string]bool{"friend-a": true, "friend-b": true, "direct": true},
+		FriendsOfFriends: map[string]bool{"fof-a": true, "fof-b": true, "direct": true, "blocked-a": true, "blocked-b": true, "inactive": true},
+		Blocked:          map[string]bool{"blocked-a": true, "blocked-b": true},
+		MutualFriends:    map[string]int{"fof-a": 2, "fof-b": 5, "friend-a": 4, "friend-b": 3, "common": 37},
+	}
+	all := runOldRankedFeed(t, ctx, conn, viewer, getFeedRequest{Feed: "friends-of-friends"})
+	if !all.HasMore {
+		t.Fatalf("fixture does not contain more than 50 eligible ranked posts")
+	}
+	basePosts, baseScores := oldRankedCandidates(t, ctx, conn, viewer)
+	if baseScores["rank-004"] != 45 {
+		t.Fatalf("expected connection cap score 45 for rank-004, got %d", baseScores["rank-004"])
+	}
+	cursorRequest := func(post PostWithAuthor) getFeedRequest {
+		score, postedAt := baseScores[post.ID], post.PostedAt
+		return getFeedRequest{Feed: "friends-of-friends", BeforeScore: &score, BeforePostedAt: &postedAt, BeforeID: post.ID}
+	}
+	inputs := []getFeedRequest{{Feed: "friends-of-friends"}, cursorRequest(basePosts[31]), cursorRequest(basePosts[len(basePosts)-3])}
+	tieCursorFound := false
+	for i := 1; i < len(basePosts); i++ {
+		if baseScores[basePosts[i-1].ID] == baseScores[basePosts[i].ID] && basePosts[i-1].PostedAt.Equal(basePosts[i].PostedAt) {
+			inputs = append(inputs, cursorRequest(basePosts[i]))
+			tieCursorFound = true
+			break
+		}
+	}
+	if !tieCursorFound {
+		t.Fatal("fixture did not produce an equal-score, equal-time cursor tie")
+	}
+	for _, input := range inputs {
+		got := runNewRankedFeed(t, ctx, conn, viewer, input)
+		want := runOldRankedFeed(t, ctx, conn, viewer, input)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("cursor(score=%v,time=%v,id=%q): SQL page %+v, Go page %+v", input.BeforeScore, input.BeforePostedAt, input.BeforeID, got, want)
+		}
+	}
+	viewer.HasPostedToday = false
+	input := getFeedRequest{Feed: "friends-of-friends"}
+	if got, want := runNewRankedFeed(t, ctx, conn, viewer, input), runOldRankedFeed(t, ctx, conn, viewer, input); !reflect.DeepEqual(got, want) || len(got.IDs) != 0 {
+		t.Errorf("no-post-today: SQL page %+v, Go page %+v", got, want)
+	}
+	viewer.HasPostedToday = true
+	query, args := rankedFeedQuery(viewer, getFeedRequest{Feed: "friends-of-friends"})
+	var plan []string
+	if err := sqlx.SelectContext(ctx, conn, &plan, "EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, SUMMARY OFF) "+query, args...); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("ranked feed local plan:\n" + strings.Join(plan, "\n"))
+}
+
+type rankedTestPage struct {
+	IDs     []string
+	Scores  []int64
+	HasMore bool
+}
+
+func runNewRankedFeed(t *testing.T, ctx context.Context, db sqlx.QueryerContext, viewer viewerContext, input getFeedRequest) rankedTestPage {
+	t.Helper()
+	posts, scores, err := selectRankedFeedWithScore(ctx, db, viewer, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rankedPage(posts, scores, input)
+}
+
+func runOldRankedFeed(t *testing.T, ctx context.Context, db sqlx.QueryerContext, viewer viewerContext, input getFeedRequest) rankedTestPage {
+	t.Helper()
+	posts, scores := oldRankedCandidates(t, ctx, db, viewer)
+	return rankedPage(posts, scores, input)
+}
+
+func oldRankedCandidates(t *testing.T, ctx context.Context, db sqlx.QueryerContext, viewer viewerContext) ([]PostWithAuthor, map[string]int64) {
+	t.Helper()
+	posts, err := selectPostsWithAuthor(ctx, db, `AND p.author_id <> $1 AND w.ended_at IS NULL ORDER BY p.posted_at DESC, p.id DESC`, viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates := make([]PostWithAuthor, 0, len(posts))
+	for _, post := range posts {
+		if viewer.canView(post.Post) && matchesFeed(viewer, nil, post.Post, "friends-of-friends") {
+			candidates = append(candidates, post)
+		}
+	}
+	if len(candidates) == 0 {
+		return candidates, map[string]int64{}
+	}
+	scores, err := recommendationScoresWithIN(ctx, db, viewer, candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return scores[candidates[i].ID] > scores[candidates[j].ID] })
+	return candidates, scores
+}
+
+func rankedPage(posts []PostWithAuthor, scores map[string]int64, input getFeedRequest) rankedTestPage {
+	page := rankedTestPage{IDs: make([]string, 0, 51), Scores: make([]int64, 0, 51)}
+	for _, post := range posts {
+		score := scores[post.ID]
+		if input.BeforeScore != nil && !rankedBefore(score, post.Post, *input.BeforeScore, *input.BeforePostedAt, input.BeforeID) {
+			continue
+		}
+		page.IDs = append(page.IDs, post.ID)
+		page.Scores = append(page.Scores, score)
+		if len(page.IDs) == 51 {
+			break
+		}
+	}
+	page.HasMore = len(page.IDs) > 50
+	if page.HasMore {
+		page.IDs = page.IDs[:50]
+		page.Scores = page.Scores[:50]
+	}
+	return page
 }
 
 type testFeedPage struct {
