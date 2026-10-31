@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 )
 
@@ -28,61 +29,25 @@ func createFriendRequestHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 		ctx := c.Request().Context()
 		actor := GetSession(c).UserID
-		tx, err := beginRelationshipTx(ctx, h.DB, actor, input.RecipientID)
+		if actor == input.RecipientID || input.RecipientID == "" {
+			return NewAPIError(http.StatusBadRequest, "invalid_relationship")
+		}
+		var request FriendRequest
+		// Row.Scan consumes and closes the result before returning, including
+		// deferred autocommit errors. Never send 201 before that succeeds.
+		err := h.DB.QueryRowxContext(ctx, `SELECT id, status, updated_at FROM create_friend_request_v1($1,$2,$3,$4)`, actor, input.RecipientID, uuid.NewString(), uuid.NewString()).Scan(&request.ID, &request.Status, &request.UpdatedAt)
 		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		blocked, err := isBlocked(ctx, tx, actor, input.RecipientID)
-		if err != nil {
-			return err
-		}
-		if blocked {
-			return NewAPIError(http.StatusConflict, "relationship_conflict")
-		}
-		friends, err := getFriendIDs(ctx, tx, actor)
-		if err != nil {
-			return err
-		}
-		for _, id := range friends {
-			if id == input.RecipientID {
-				return NewAPIError(http.StatusConflict, "relationship_conflict")
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) {
+				switch pgErr.Code {
+				case "PR400":
+					return NewAPIError(http.StatusBadRequest, "invalid_relationship")
+				case "PR404":
+					return NewAPIError(http.StatusNotFound, "relationship_not_found")
+				case "PR409":
+					return NewAPIError(http.StatusConflict, "relationship_conflict")
+				}
 			}
-		}
-		var existingID string
-		err = tx.GetContext(ctx, &existingID, `
-   SELECT id FROM friend_requests WHERE status='pending' AND
-    ((requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1))
-  `, actor, input.RecipientID)
-		var requestID string
-		if err == nil {
-			request, err := getFriendRequest(ctx, tx, existingID)
-			if err != nil {
-				return err
-			}
-			if request.RequesterID == actor {
-				return NewAPIError(http.StatusConflict, "relationship_conflict")
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE friend_requests SET status='accepted', updated_at=clock_timestamp() WHERE id=$1`, request.ID); err != nil {
-				return err
-			}
-			if err := insertFriendship(ctx, tx, request); err != nil {
-				return err
-			}
-			requestID = request.ID
-		} else if errors.Is(err, sql.ErrNoRows) {
-			requestID = uuid.NewString()
-			if _, err := tx.ExecContext(ctx, `INSERT INTO friend_requests (id, requester_id, recipient_id, status, created_at, updated_at) VALUES ($1,$2,$3,'pending',clock_timestamp(),clock_timestamp())`, requestID, actor, input.RecipientID); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-		request, err := getFriendRequest(ctx, tx, requestID)
-		if err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
 			return err
 		}
 		return c.JSON(http.StatusCreated, createFriendRequestResponse{RelationID: request.ID, Status: request.Status, UpdatedAt: request.UpdatedAt})
