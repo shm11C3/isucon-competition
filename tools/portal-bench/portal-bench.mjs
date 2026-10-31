@@ -61,7 +61,7 @@ async function readJob(page, id) {
   return {
     job: id, status,
     pass: res ? !!res.pass : (/Passed/.test(text) ? true : /Failed|ERRORED/.test(text) ? false : null),
-    score: res?.score ?? Number((/Score:\s*(\d+)/.exec(text) || [])[1] ?? NaN) || null, messages: res?.messages ?? null,
+    score: res?.score ?? (Number((/Score:\s*(\d+)/.exec(text) || [])[1]) || null), messages: res?.messages ?? null,
     started: grab('Started At'), finished: grab('Finished At'),
     done: status !== null && !BUSY_RE.test(status),
   };
