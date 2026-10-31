@@ -134,19 +134,22 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusConflict, "post_slot_unavailable")
 		}
 		imageID := uuid.NewString()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at) VALUES ($1, $2, $3, 'image/jpeg', $4)`, imageID, userID, imageData, postedAt); err != nil {
-			return err
-		}
 		postID := uuid.NewString()
 		var post Post
 		if err := tx.GetContext(ctx, &post, `
+   WITH image AS (
+     INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at)
+     VALUES ($4, $2, $12, 'image/jpeg', $11)
+     RETURNING id
+   )
    INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
                       location_kind, latitude, longitude, locality, posted_at)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+   SELECT $1, $2, $3, image.id, $5, $6, $7, $8, $9, $10, $11
+   FROM image
    RETURNING id, author_id, posting_window_id, image_id, caption, visibility,
              location_kind, latitude, longitude, locality, posted_at
   `, postID, userID, window.ID, imageID, input.Caption, input.Visibility,
-			location.Kind, location.Latitude, location.Longitude, location.Locality, postedAt); err != nil {
+			location.Kind, location.Latitude, location.Longitude, location.Locality, postedAt, imageData); err != nil {
 			return err
 		}
 		post.OnTimeDeadline = window.OnTimeDeadline
