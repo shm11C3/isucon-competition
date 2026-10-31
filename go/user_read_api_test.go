@@ -67,6 +67,9 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id,username,display_name,status,search_username,search_display_name) VALUES ('inactive','inactive','needle inactive','deleted','inactive','needle inactive')`); err != nil {
 		t.Fatal("insert inactive fixture")
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id,username,display_name,search_username,search_display_name) VALUES ('viewer','viewer','needle viewer','viewer','needle viewer')`); err != nil {
+		t.Fatal("insert viewer fixture")
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO block_relations VALUES ('viewer','id-00001'),('id-00002','viewer')`); err != nil {
 		t.Fatal("insert block fixture")
 	}
@@ -128,11 +131,19 @@ func TestSearchUsersSQLMatchesGoOracle(t *testing.T) {
 	if err := db.GetContext(ctx, &updated, `SELECT count(*) FROM users WHERE id='id-00000' AND strpos(search_display_name,'renamed')>0`); err != nil || updated != 1 {
 		t.Fatal("updated normalized value not searchable")
 	}
+	var renamed []User
+	if err := db.SelectContext(ctx, &renamed, searchUsersSQL, "viewer", "", "", normalizeSearchText("renamed")); err != nil || len(renamed) != 1 || renamed[0].ID != "id-00000" {
+		t.Fatal("updated display name did not match search query")
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE users u SET display_name=i.display_name,search_username=i.search_username,search_display_name=i.search_display_name FROM initial_users i WHERE u.id=i.id AND u.id='id-00000'`); err != nil {
 		t.Fatal("reset fixture")
 	}
 	var restored int
 	if err := db.GetContext(ctx, &restored, `SELECT count(*) FROM users WHERE id='id-00000' AND strpos(search_display_name,'renamed')=0 AND strpos(search_display_name,'needle')>0`); err != nil || restored != 1 {
 		t.Fatal("reset did not restore normalized source")
+	}
+	var oldName []User
+	if err := db.SelectContext(ctx, &oldName, searchUsersSQL, "viewer", "", "", normalizeSearchText("needle")); err != nil || len(oldName) == 0 || oldName[0].ID != "id-00000" {
+		t.Fatal("reset source was not searchable")
 	}
 }
