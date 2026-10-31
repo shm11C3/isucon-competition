@@ -8,6 +8,10 @@
 - 直前: `690c937d`（T68b、europe 書込が asia2）#26712 97102 / messages 17。`ff08f40f`（T68、asia POST が america1）#26426 74647 / messages 0。
 - 配置だけ戻す場合: asia1 nginx を `etc-asia1/nginx/isureal.conf`（POST ローカル）に差し替えて reload、asia2 `isureal-go-asia-post` を `disable --now`。
 
+## T-0075（TCP 設定）は不採用で撤去
+
+- #28631 79945 / messages 1 で効果なし。ドリル前に sysctl=1、initcwnd 除去、unit 削除で元へ戻した。
+
 ## binary の識別
 
 - `89496093` の純 Go ビルド = sha256 先頭 `8e0ec1b2`（`ldd` に libcrypto なし）。これを最終にする。

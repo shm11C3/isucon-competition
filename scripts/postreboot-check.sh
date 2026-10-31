@@ -20,6 +20,7 @@ for h in asia1 asia2 europe1 america1; do
 		test -d /home/isucon/image-store && echo "image-store files: $(find /home/isucon/image-store -type f | wc -l)"
 		sudo -n /usr/local/bin/envcheck 2>&1 | grep -ao "全ての追試環境チェックをパスしました" || echo "envcheck: NOT PASSED"
 		echo "mem avail: $(free -m | awk "NR==2{print \$7}")MB oom: $(sudo -n dmesg | grep -c oom-kill:)"
+		for port in 8080 443; do echo "router 192.168.10.10:$port from app host -> $(curl -s -o /dev/null -w %{http_code} --connect-timeout 5 http://192.168.10.10:$port/ 2>/dev/null) (000 required after the router update)"; done
 	' 2>&1 | sed 's/^/   /'
 done
 echo "-- data (primary, since initial boundary)"
