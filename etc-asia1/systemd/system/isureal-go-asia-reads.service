@@ -1,0 +1,20 @@
+[Unit]
+Description=isureal-go for asia reads (local hot standby)
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/go
+EnvironmentFile=/home/isucon/env.sh
+EnvironmentFile=/etc/isureal/local-db.env
+Environment=ISUREAL_REGION=asia
+Environment=ISUREAL_PORT=8083
+Environment=ISUREAL_PPROF_PORT=6063
+ExecStart=/home/isucon/webapp/go/isureal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

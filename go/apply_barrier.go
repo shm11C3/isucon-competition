@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -23,8 +25,9 @@ const applyBarrierMinInterval = 10 * time.Millisecond
 const applyBarrierTimeout = 5 * time.Minute
 
 // applyBarrierSyncStandbys is how many standbys must be in sync state for a
-// barrier commit to prove that every region has applied the writes.
-const applyBarrierSyncStandbys = 2
+// barrier commit to prove that every region has applied the writes. It must
+// match the number of standbys listed in synchronous_standby_names.
+var applyBarrierSyncStandbys = envInt("ISUREAL_SYNC_STANDBYS", 2)
 
 var errApplyBarrierStandbys = errors.New("apply barrier: fewer sync standbys than required")
 var errApplyBarrierNotApplied = errors.New("apply barrier: standbys have not replayed the barrier")
@@ -209,4 +212,11 @@ func ApplyBarrierMiddleware(b *applyBarrier) echo.MiddlewareFunc {
 			return err
 		}
 	}
+}
+
+func envInt(key string, defaultValue int) int {
+	if value, err := strconv.Atoi(os.Getenv(key)); err == nil && value > 0 {
+		return value
+	}
+	return defaultValue
 }
