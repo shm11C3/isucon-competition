@@ -106,3 +106,10 @@ sudo -u postgres psql -X -c "ALTER SYSTEM RESET synchronous_standby_names" -c "A
 - standby 側クエリ競合 → max_standby_streaming_delay=1s で強制キャンセル（GET が稀に 500）。hot_standby_feedback で VACUUM 競合を抑止。
 - europe1/america1 メモリ: PG 1GB + Go。image cache 縮小。
 - initialize の reset.sql は primary で実行され複製される。standby 側の process cache はなし（visibility は毎回 DB）。
+
+## 実施記録（2026-10-31 12:07 JST 完了）
+- 11:52 pg_basebackup（-R -X stream -C -S）を europe1/america1 から asia2 へ、各約17MB/s、12:04 完了。primary_conninfo に application_name を追記。
+- 12:05 両 standby streaming、primary を FIRST 2 (europe1, america1) + remote_apply。
+- 12:06 isureal-go drop-in（後続 EnvironmentFile=/etc/isureal/local-db.env）と nginx isureal-local-reads.conf を有効化。旧 nginx 設定は sites-available/isureal-forward-all.conf。
+- 検証: register→login→GET /api/me 200、PATCH→GET 反映、logout→401、initialize 8.7s、standby 反映 0 行差、conflict 0、write 208ms。
+- 戻し: 各 standby で nginx を forward-all に戻し drop-in 削除・isureal-go 再起動 → asia2 で ALTER SYSTEM RESET synchronous_standby_names / synchronous_commit → reload。
