@@ -75,7 +75,7 @@ func createCommentHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitWithReplicaBarrier(ctx, h.DB, tx); err != nil {
 			return err
 		}
 		return c.JSON(http.StatusCreated, newCommentResponse(comment, user))

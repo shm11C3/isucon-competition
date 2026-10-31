@@ -2,6 +2,13 @@ SET session_replication_role = replica;
 
 BEGIN;
 
+DO $$
+BEGIN
+  IF to_regclass('public.replica_commit_barriers') IS NOT NULL THEN
+    TRUNCATE TABLE public.replica_commit_barriers;
+  END IF;
+END $$;
+
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 
 DO $$
