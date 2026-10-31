@@ -20,6 +20,9 @@ type Config struct {
 	ImageStoreToken string
 	// ImageCachePeerURL is the GET process on this host whose cache receives uploaded bytes.
 	ImageCachePeerURL string
+	// LocalImageCache is off for write-only processes that never serve GET
+	// /api/images, so their 128MiB image cache does not compete with GOMEMLIMIT.
+	LocalImageCache bool
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
 }
@@ -37,6 +40,7 @@ func ConfigFromEnv() *Config {
 		ImageStoreURL:     envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
 		ImageStoreToken:   envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
 		ImageCachePeerURL: envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
+		LocalImageCache:   envOrDefault("ISUREAL_IMAGE_CACHE_LOCAL", "1") != "0",
 		ApplyBarrier:      envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
 	}
 }

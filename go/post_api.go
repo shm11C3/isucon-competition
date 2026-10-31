@@ -132,7 +132,9 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 		if h.ImageStore != nil {
 			// This process and the GET process on this host serve views from memory.
-			putCachedImage(imageID, &cachedImage{data: imageData, mediaType: "image/jpeg"})
+			if h.Config.LocalImageCache {
+				putCachedImage(imageID, &cachedImage{data: imageData, mediaType: "image/jpeg"})
+			}
 			h.ImageStore.warmPeerCache(h.Config.ImageCachePeerURL, imageID, imageData)
 		}
 		return c.JSON(http.StatusCreated, newPostResponse(created.Post, created.Author))
