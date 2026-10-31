@@ -1,6 +1,8 @@
 # 案R 手順書: europe1/america1 に同期レプリカ、GETをリージョン内で完結（Claude-02, 2026-10-31 11:50 JST）
 
-前提（確認済み）
+> 運用時の復旧は現在の §7 を使う。§0〜3 は実施前の設計履歴であり、再実行用コマンドではない。実際のコピーは末尾の実施記録にある pg_basebackup -R -X stream -C -S へ変更済み。旧 rsync/size-only/データディレクトリ操作を現在のクラスタへ実行しない。
+
+前提（実施前の記録）
 - europe1/america1: PG16.15 インストール済み・停止中・disabled。/var/lib/postgresql/16/main は asia2 と同じ system identifier 7702429198198691336 の初期スナップショット（checkpoint 4/57A3CDC8、primary は 6/1D02DA40 以降）。
 - asia2 の初期画像パーティション（1GB×N）は 10:10 JST 頃に mtime 更新あり（hint bit / VACUUM）。rsync は差分転送になるが、全ページが触られていれば実質17GB転送。先に帯域を計測して判断する。
 - GET ハンドラは全て DB 書込なし。POST/PUT/PATCH/DELETE は asia1 の地域別プロセス（:8081 europe / :8082 america、現在 america は asia2:8082）へ転送中。
@@ -8,7 +10,7 @@
 - 実施は Main の環境占有下で、ベンチ測定の合間に行う。asia2 の OOM 復旧完了が前提。
 
 ## 0. 事前（5分）
-- asia2 メモリ: shared_buffers は 90-isureal.conf の 1536MB が有効。レプリカ化後は asia2 から読み取り負荷が減るので america プロセスの同居は不要になる（asia1 へ戻す or 残すなら imageCache を縮小）。
+- asia2 メモリ: shared_buffers は OOM 修復後の実効値 1GB（旧設計の1536MBから変更）。レプリカ化後は asia2 から読み取り負荷が減るので america プロセスの同居は不要になる（asia1 へ戻す or 残すなら imageCache を縮小）。
 - 帯域計測（20秒）: asia2 で `python3 -m http.server 8099 --directory /tmp &`、/tmp に 200MB ファイル、europe1 から `curl -o /dev/null -w '%{speed_download}\n' http://192.168.4.10:8099/f` → 終了後 kill。17GB/速度 で所要を見積もる（100Mbps なら約23分/台、並列で asia2 送出が共有なら倍）。
 - 所要が30分超なら、初期画像パーティション（base/16385/ 内の 1GB ファイル群で mtime が 10-30 のもの＝europe1 側と同一）を `--size-only` 相当で飛ばす選択肢。hint bit 差は WAL 非記録で standby として有効。ただしスナップショット以後に初期パーティションへ入った WAL 記録変更（プロフィール画像差替えによる旧行 DELETE 等）は再生されない＝stale 行が残り得る。到達経路は users.profile_image_id 経由のみなので実害は小さいが、正しさ優先なら全転送。
 
@@ -79,7 +81,7 @@ SQL
 
 ## 5. アプリ経路
 europe1/america1:
-- `/etc/systemd/system/isureal-go.service.d/local-db.conf`: `[Service]\nEnvironment=ISUREAL_DB_HOST=127.0.0.1`（env.sh は変更しない。guard は primary のまま）→ daemon-reload、restart。
+- `/etc/systemd/system/isureal-go.service.d/local-db.conf`: `[Service]\nEnvironmentFile=/etc/isureal/local-db.env`。この後続ファイルの内容は `ISUREAL_DB_HOST=127.0.0.1`（既存 EnvironmentFile の同名変数は Environment= より優先される。env.sh は変更しない。guard は primary のまま）→ daemon-reload、restart。
 - nginx: GET はローカル :8080、それ以外は現行 upstream（asia1 :8081 / asia2 or asia1 :8082）。
 ```
 map $request_method $isureal_upstream { default isureal_near_db; GET isureal_local; }
@@ -95,11 +97,35 @@ location /api/ { ... proxy_pass http://$isureal_upstream; }
 3. 公式ベンチ1回。欧米の人数成長と asia の +100ms 書込の影響を見る。
 4. 再起動試験: 4台 reboot → standby が自動起動し streaming、primary の COMMIT が通る（standby 未接続中は COMMIT が待つので起動順に注意）。
 
-## 7. フォールバック（2分）
+## 7. フォールバック（地域の読み取り経路を先に戻す）
+
+Main の環境占有下、ベンチを止めた境界で実施する。**同期解除より前に europe1 / america1 の両方で以下を完了する。** 片方が失敗した場合は同期設定を解除せず、その経路を修復する。
+
+各地域ホストで、GET を含む全 API を従来転送へ戻し、ローカル Go も元の primary 接続へ再起動する（既存 SSE/リクエストも旧 Go と共に終了させる）:
+
+```sh
+set -eu
+sudo cp /etc/nginx/sites-available/isureal-forward-all.conf /etc/nginx/sites-enabled/isureal.conf
+sudo nginx -t
+sudo systemctl reload nginx
+sudo rm -f /etc/systemd/system/isureal-go.service.d/local-db.conf
+sudo systemctl daemon-reload
+sudo systemctl restart isureal-go
+systemctl is-active isureal-go
 ```
-sudo -u postgres psql -X -c "ALTER SYSTEM RESET synchronous_standby_names" -c "ALTER SYSTEM RESET synchronous_commit" -c "SELECT pg_reload_conf()"
+
+各コマンドの失敗時は中止する。検査と reload / daemon-reload と restart を `&&` で結んで後続へ進める形にしない。両地域で nginx が全 API を転送し、Go の実 PID の `ISUREAL_DB_HOST` が元の primary（192.168.4.10）へ戻ったことを確認する。全環境変数や認証情報は出力しない。
+
+両地域から standby を読む経路がなくなったことを確認してから、asia2 で同期設定を戻す:
+
+```sh
+sudo -u postgres psql -X -v ON_ERROR_STOP=1 \
+  -c "ALTER SYSTEM RESET synchronous_standby_names" \
+  -c "ALTER SYSTEM RESET synchronous_commit" \
+  -c "SELECT pg_reload_conf()"
 ```
-+ europe1/america1 の nginx map を外して全て asia1 転送へ、isureal-go drop-in を外す。standby は止めてよい（slot は削除して WAL 蓄積を止める: `pg_drop_replication_slot`）。
+
+通常の書込直後の地域 GET と initialize を Main の必要な検証境界で確認する。standby を廃止する場合は、この順序を完了した後で停止し、slot が inactive になってから不要な slot を削除する。同期解除を先に行うと、成功した書込の直後に standby で古い内容を読める窓が生じる。
 
 ## リスク一覧
 - standby 停止/遅延で primary の COMMIT 停止 → 追試の再起動順。slot の WAL 蓄積（33GB 空き）。

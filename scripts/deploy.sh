@@ -30,6 +30,11 @@ deploy() {
 }
 hosts=(asia1 europe1 america1)
 deploy_asia2() {
+	# America also executes ../sql/init.sh here; keep reset SQL with its binary.
+	rsync -a -e "ssh -F $CFG -o BatchMode=yes" --exclude '._*' sql asia2:webapp/ || {
+		printf 'deploy failed: asia2 SQL transfer\n' >&2
+		return 1
+	}
 	# Stage bytes first. A failed source SSH must not replace the running binary.
 	ssh -F "$CFG" -o BatchMode=yes asia1 'cat ~/webapp/go/isureal' |
 		ssh -F "$CFG" -o BatchMode=yes asia2 'set -eu; mkdir -p ~/webapp/go; cat > ~/webapp/go/isureal.new' || {
