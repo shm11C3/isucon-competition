@@ -1,0 +1,20 @@
+[Unit]
+Description=isureal-go for europe users (writes near the primary)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/go
+EnvironmentFile=/home/isucon/env.sh
+ExecStart=/usr/bin/env GOMEMLIMIT=500MiB ISUREAL_REGION=europe ISUREAL_PORT=8081 /home/isucon/webapp/go/isureal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/isureal-go-europe.service.d/90-eaa-cache-stats.conf
+[Service]
+EnvironmentFile=/etc/isureal-pprof/isureal-go-europe.env
