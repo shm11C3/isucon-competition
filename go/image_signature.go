@@ -13,7 +13,7 @@ import (
 
 const imageURLLifetime = 24 * time.Hour
 const imageSignatureIterations = 1000
-const imageURLExpiryStep = 5 * time.Minute
+const imageURLExpiryStep = time.Minute
 
 func imageSigningKey(secretKeyHash string) ([]byte, error) {
 	key, err := hex.DecodeString(secretKeyHash)
