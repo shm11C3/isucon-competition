@@ -48,10 +48,9 @@ func openPostingWindowHandler(h *HandlerContext) echo.HandlerFunc {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(20261031, $1)`, regionLockID); err != nil {
 			return err
 		}
-		// Keep registration and user changes out of the notification snapshot.
-		if _, err := tx.ExecContext(ctx, `LOCK TABLE users IN SHARE MODE`); err != nil {
-			return err
-		}
+		// The notification INSERT ... SELECT runs under one statement snapshot, so
+		// the users it addresses are consistent without a table lock; waiting for
+		// in-flight user writers only delayed every open by their commit time.
 		var conflict bool
 		if err := tx.GetContext(ctx, &conflict, `SELECT EXISTS(SELECT 1 FROM posting_windows WHERE region = $1 AND local_date >= $2)`, region, localDate); err != nil {
 			return err
