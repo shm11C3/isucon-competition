@@ -129,8 +129,9 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		if h.ImageStore != nil {
-			// The uploading region serves most views of this image from memory.
+			// This process and the GET process on this host serve views from memory.
 			putCachedImage(imageID, &cachedImage{data: imageData, mediaType: "image/jpeg"})
+			h.ImageStore.warmPeerCache(h.Config.ImageCachePeerURL, imageID, imageData)
 		}
 		return c.JSON(http.StatusCreated, newPostResponse(created.Post, created.Author))
 	}

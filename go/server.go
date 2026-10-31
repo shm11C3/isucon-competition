@@ -46,6 +46,9 @@ func NewServer(config *Config) *echo.Echo {
 		IPBans:     &IPBanList{},
 		ImageStore: newImageStoreClient(config.ImageStoreURL, config.ImageStoreToken),
 	}
+	if config.ImageStoreToken != "" {
+		registerCacheWarmRoute(e, config.ImageStoreToken)
+	}
 	if store, err := newImageStoreServer(config.ImageStoreDir, config.ImageStoreToken); err != nil {
 		panic("failed to open image store: " + err.Error())
 	} else if store != nil {

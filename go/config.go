@@ -18,23 +18,26 @@ type Config struct {
 	ImageStoreDir   string
 	ImageStoreURL   string
 	ImageStoreToken string
+	// ImageCachePeerURL is the GET process on this host whose cache receives uploaded bytes.
+	ImageCachePeerURL string
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
 }
 
 func ConfigFromEnv() *Config {
 	return &Config{
-		Region:          envOrDefault("ISUREAL_REGION", "asia"),
-		DBHost:          envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
-		DBPort:          envOrDefault("ISUREAL_DB_PORT", "5432"),
-		DBUser:          envOrDefault("ISUREAL_DB_USER", "isureal"),
-		DBPassword:      envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
-		DBName:          envOrDefault("ISUREAL_DB_NAME", "isureal"),
-		LogLevel:        envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
-		ImageStoreDir:   envOrDefault("ISUREAL_IMAGE_STORE_DIR", ""),
-		ImageStoreURL:   envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
-		ImageStoreToken: envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
-		ApplyBarrier:    envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
+		Region:            envOrDefault("ISUREAL_REGION", "asia"),
+		DBHost:            envOrDefault("ISUREAL_DB_HOST", "127.0.0.1"),
+		DBPort:            envOrDefault("ISUREAL_DB_PORT", "5432"),
+		DBUser:            envOrDefault("ISUREAL_DB_USER", "isureal"),
+		DBPassword:        envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
+		DBName:            envOrDefault("ISUREAL_DB_NAME", "isureal"),
+		LogLevel:          envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
+		ImageStoreDir:     envOrDefault("ISUREAL_IMAGE_STORE_DIR", ""),
+		ImageStoreURL:     envOrDefault("ISUREAL_IMAGE_STORE_URL", ""),
+		ImageStoreToken:   envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
+		ImageCachePeerURL: envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
+		ApplyBarrier:      envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
 	}
 }
 

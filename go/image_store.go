@@ -111,6 +111,54 @@ func (s *imageStoreClient) Wipe(ctx context.Context) error {
 	return nil
 }
 
+// warmPeerCache hands freshly uploaded bytes to the GET process on the same
+// host (ISUREAL_IMAGE_CACHE_PEER_URL) so same-region views come from memory.
+// Best effort: failures are ignored.
+func (s *imageStoreClient) warmPeerCache(peerURL, id string, data []byte) {
+	if peerURL == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(peerURL, "/")+"/internal/cache/"+id, bytes.NewReader(data))
+		if err != nil {
+			return
+		}
+		if s.token != "" {
+			req.Header.Set(imageStoreTokenHeader, s.token)
+		}
+		req.Header.Set("Content-Type", "image/jpeg")
+		req.ContentLength = int64(len(data))
+		resp, err := s.http.Do(req)
+		if err != nil {
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+}
+
+// registerCacheWarmRoute accepts bytes for the in-memory image cache from a
+// sibling process on the same host.
+func registerCacheWarmRoute(e *echo.Echo, token string) {
+	e.PUT("/internal/cache/:id", func(c *echo.Context) error {
+		if token == "" || c.Request().Header.Get(imageStoreTokenHeader) != token {
+			return c.NoContent(http.StatusForbidden)
+		}
+		id := c.Param("id")
+		if !validImageStoreID(id) {
+			return c.NoContent(http.StatusBadRequest)
+		}
+		data, err := readUploadBody(c.Request().Body, c.Request().ContentLength)
+		if err != nil {
+			return err
+		}
+		putCachedImage(id, &cachedImage{data: data, mediaType: "image/jpeg"})
+		return c.NoContent(http.StatusNoContent)
+	})
+}
+
 // --- server side ---
 
 type imageStoreServer struct {

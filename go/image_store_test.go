@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 )
@@ -57,3 +58,31 @@ func TestImageStoreRoundTrip(t *testing.T) {
 		t.Fatalf("store not empty after wipe: %d", len(entries))
 	}
 }
+
+func TestCacheWarmRoute(t *testing.T) {
+	e := echo.New()
+	registerCacheWarmRoute(e, "secret")
+	ts := httptest.NewServer(e)
+	defer ts.Close()
+	client := newImageStoreClient("http://unused", "secret")
+	data := bytes.Repeat([]byte{1, 2, 3}, 1000)
+	client.warmPeerCache(ts.URL, "cache-warm-test-id", data)
+	deadline := make(chan struct{})
+	go func() {
+		for i := 0; i < 200; i++ {
+			if getCachedImage("cache-warm-test-id") != nil {
+				close(deadline)
+				return
+			}
+			timeSleep()
+		}
+		close(deadline)
+	}()
+	<-deadline
+	cached := getCachedImage("cache-warm-test-id")
+	if cached == nil || !bytes.Equal(cached.data, data) {
+		t.Fatal("peer cache not warmed")
+	}
+}
+
+func timeSleep() { <-time.After(10 * time.Millisecond) }
