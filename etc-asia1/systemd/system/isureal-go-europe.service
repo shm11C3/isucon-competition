@@ -8,9 +8,7 @@ User=isucon
 Group=isucon
 WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
-Environment=ISUREAL_REGION=europe
-Environment=ISUREAL_PORT=8081
-ExecStart=/home/isucon/webapp/go/isureal
+ExecStart=/usr/bin/env ISUREAL_REGION=europe ISUREAL_PORT=8081 /home/isucon/webapp/go/isureal
 Restart=on-failure
 RestartSec=5
 
