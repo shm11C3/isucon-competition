@@ -14,8 +14,8 @@ for h in asia1 asia2 europe1 america1; do
 		systemctl list-units --type=service --state=active --no-legend "isureal*" "postgresql@*" "nginx*" | awk "{printf \"%s \", \$1}"; echo
 		sudo -n nginx -t >/dev/null 2>&1 && echo "nginx: config ok" || echo "nginx: n/a or broken"
 		if systemctl is-active -q postgresql@16-main; then
-			sudo -n -u postgres psql -Atc "select case when pg_is_in_recovery() then $$standby$$ else $$primary$$ end" 2>/dev/null
-			sudo -n -u postgres psql -Atc "select application_name||$$:$$||state||$$/$$||sync_state from pg_stat_replication" 2>/dev/null | tr "\n" " "; echo
+			echo "in_recovery(standby=t): $(sudo -n -u postgres psql -Atc "select pg_is_in_recovery()" 2>/dev/null)"
+			sudo -n -u postgres psql -Atc "select concat_ws(chr(58), application_name, state, sync_state) from pg_stat_replication" 2>/dev/null | tr "\n" " "; echo
 		fi
 		test -d /home/isucon/image-store && echo "image-store files: $(find /home/isucon/image-store -type f | wc -l)"
 		sudo -n /usr/local/bin/envcheck 2>&1 | grep -ao "全ての追試環境チェックをパスしました" || echo "envcheck: NOT PASSED"
@@ -28,7 +28,7 @@ r asia2 'sudo -n -u postgres psql -d isureal -At -c "
          (select count(*) from image_objects where created_at > (select created_at from initial_data_boundary)) images,
          (select count(*) from comments where created_at > (select created_at from initial_data_boundary)) comments,
          (select count(*) from realmojis where created_at > (select created_at from initial_data_boundary)) realmojis,
-         (select md5(string_agg(id, $$,$$ order by id)) from posts where created_at > (select created_at from initial_data_boundary)) post_ids"' | sed 's/^/   /'
+         (select md5(string_agg(id, chr(44) order by id)) from posts where created_at > (select created_at from initial_data_boundary)) post_ids"' | sed 's/^/   /'
 echo "-- router"
 curl -sk -m 8 -o /dev/null -w '   https / -> %{http_code}\n' https://35.74.223.182/ -H 'Host: app.team60055-aws.127.0.0.1.nip.io'
 for cc in JP DE US; do curl -sk -m 8 -o /dev/null -w "   $cc /api/posting-window/current -> %{http_code}\n" -H "X-Country-Code: $cc" https://35.74.223.182/api/posting-window/current -H 'Host: app.team60055-aws.127.0.0.1.nip.io'; done
