@@ -14,7 +14,8 @@ SELECT greatest(
   (SELECT max(created_at) FROM posts),
   (SELECT max(created_at) FROM realmojis),
   (SELECT max(created_at) FROM comments),
-  (SELECT max(created_at) FROM notifications)
+  (SELECT max(created_at) FROM notifications),
+  (SELECT max(created_at) FROM notification_batches)
 ) AS created_at;
 
 CREATE TABLE initial_users AS SELECT * FROM users;

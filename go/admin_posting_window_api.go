@@ -74,8 +74,9 @@ func openPostingWindowHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-   INSERT INTO notifications (id, user_id, posting_window_id, created_at)
-   SELECT gen_random_uuid()::text, id, $2, $3 FROM users WHERE region = $1 AND status = 'active'
+   INSERT INTO notification_batches (posting_window_id, created_at, recipients)
+   SELECT $2, $3, COALESCE(jsonb_object_agg(id, gen_random_uuid()::text), '{}'::jsonb)
+   FROM users WHERE region = $1 AND status = 'active'
   `, region, windowID, startsAt); err != nil {
 			return err
 		}
