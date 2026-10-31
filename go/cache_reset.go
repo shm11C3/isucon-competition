@@ -43,6 +43,9 @@ func resetPeerCaches(ctx context.Context, urls []string, token string) error {
 }
 
 func resetPeerCachesWithClient(ctx context.Context, urls []string, token string, client *http.Client) error {
+	if token != "" && len(urls) == 0 {
+		return fmt.Errorf("cache reset peers missing for configured image store")
+	}
 	for _, baseURL := range urls {
 		baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 		if baseURL == "" {
