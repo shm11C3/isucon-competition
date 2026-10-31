@@ -63,6 +63,11 @@ func exportPostsHandler(h *HandlerContext) echo.HandlerFunc {
 						return err
 					}
 				}
+				if len(data) == 0 {
+					// Same outcome as before: a store-managed row whose bytes are
+					// missing is an error, never a silent empty file in the archive.
+					return errImageStoreMissing
+				}
 				post.ImageData = data
 			}
 			imagePath := fmt.Sprintf("images/%06d.jpg", len(items)+1)
