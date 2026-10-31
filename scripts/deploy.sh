@@ -19,6 +19,10 @@ deploy() {
 		set -- isureal-go
 		if test "$(hostname)" = ip-192-168-1-10; then
 			set -- "$@" isureal-go-europe
+			# asia reads run against the local standby (案S); the unit exists only after cutover.
+			if systemctl is-enabled --quiet isureal-go-asia-reads 2>/dev/null; then
+				set -- "$@" isureal-go-asia-reads
+			fi
 		fi
 		sudo systemctl restart "$@"
 		sleep 1
