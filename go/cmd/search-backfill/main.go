@@ -29,6 +29,9 @@ func main() {
 		log.Fatal("begin backfill failed")
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(context.Background(), `SET LOCAL synchronous_commit = 'remote_apply'`); err != nil {
+		log.Fatal("set backfill commit durability failed")
+	}
 	if _, err := tx.Exec(`LOCK TABLE users, initial_users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 		log.Fatal("lock search tables failed")
 	}
