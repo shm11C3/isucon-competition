@@ -128,58 +128,34 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 }
 
 func nonRankedFeedQuery(viewer viewerContext, following map[string]bool, input getFeedRequest, beforePostedAt *time.Time, beforeID string) (string, []any, error) {
-	conditions := `
-   AND p.author_id <> ? AND w.ended_at IS NULL
-   AND (?::timestamptz IS NULL OR (p.posted_at, p.id) < (?, ?))
-   AND ?
+	common := `
+   AND p.author_id <> $1 AND w.ended_at IS NULL
+   AND ($2::timestamptz IS NULL OR (p.posted_at, p.id) < ($3, $4))
+   AND $5
+   AND NOT (p.author_id = ANY($6::text[]))
   `
-	args := []any{viewer.ID, beforePostedAt, beforePostedAt, beforeID, viewer.HasPostedToday}
-	blockedIDs := sortedMapIDs(viewer.Blocked)
-	if len(blockedIDs) > 0 {
-		conditions += ` AND p.author_id NOT IN (?)`
-		args = append(args, blockedIDs)
-	}
+	args := []any{viewer.ID, beforePostedAt, beforePostedAt, beforeID, viewer.HasPostedToday, sortedMapIDs(viewer.Blocked)}
 
 	switch input.Feed {
 	case "public":
-		conditions += ` AND p.visibility = 'public'`
+		return common + ` AND p.visibility = 'public' ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`, args, nil
 	case "friends":
 		friendIDs := sortedMapIDs(viewer.Friends)
-		if len(friendIDs) == 0 {
-			conditions += ` AND FALSE`
-		} else {
-			conditions += ` AND p.author_id IN (?) AND p.visibility IN ('public', 'friends', 'friends_of_friends')`
-			args = append(args, friendIDs)
-		}
+		args = append(args, friendIDs)
+		return common + ` AND p.author_id = ANY($7::text[]) AND p.visibility IN ('public', 'friends', 'friends_of_friends') ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`, args, nil
 	case "following":
 		followeeIDs := sortedMapIDs(following)
-		if len(followeeIDs) == 0 {
-			conditions += ` AND FALSE`
-		} else {
-			conditions += ` AND p.author_id IN (?)`
-			args = append(args, followeeIDs)
-			friendIDs := sortedMapIDs(viewer.Friends)
-			fofIDs := sortedMapIDs(unionBoolMaps(viewer.Friends, viewer.FriendsOfFriends))
-			conditions += ` AND (p.visibility = 'public'`
-			if len(friendIDs) > 0 {
-				conditions += ` OR (p.visibility = 'friends' AND p.author_id IN (?))`
-				args = append(args, friendIDs)
-			}
-			if len(fofIDs) > 0 {
-				conditions += ` OR (p.visibility = 'friends_of_friends' AND p.author_id IN (?))`
-				args = append(args, fofIDs)
-			}
-			conditions += `)`
-		}
+		friendIDs := sortedMapIDs(viewer.Friends)
+		fofIDs := sortedMapIDs(unionBoolMaps(viewer.Friends, viewer.FriendsOfFriends))
+		args = append(args, followeeIDs, friendIDs, fofIDs)
+		return common + ` AND p.author_id = ANY($7::text[])
+   AND (p.visibility = 'public'
+        OR (p.visibility = 'friends' AND p.author_id = ANY($8::text[]))
+        OR (p.visibility = 'friends_of_friends' AND p.author_id = ANY($9::text[])))
+   ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`, args, nil
 	default:
-		conditions += ` AND FALSE`
+		return common + ` AND FALSE ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`, args, nil
 	}
-	conditions += ` ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`
-	query, args, err := sqlx.In(conditions, args...)
-	if err != nil {
-		return "", nil, err
-	}
-	return sqlx.Rebind(sqlx.DOLLAR, query), args, nil
 }
 
 func sortedMapIDs(values map[string]bool) []string {
@@ -230,15 +206,11 @@ func recommendationScores(ctx context.Context, db sqlx.QueryerContext, viewer vi
 		postIDs = append(postIDs, post.ID)
 	}
 
-	query, args, err := sqlx.In(`SELECT user_low_id, user_high_id FROM friendships WHERE user_low_id IN (?) OR user_high_id IN (?)`, authorIDs, authorIDs)
-	if err != nil {
-		return nil, err
-	}
 	var friendships []struct {
 		UserLowID  string `db:"user_low_id"`
 		UserHighID string `db:"user_high_id"`
 	}
-	if err := sqlx.SelectContext(ctx, db, &friendships, sqlx.Rebind(sqlx.DOLLAR, query), args...); err != nil {
+	if err := sqlx.SelectContext(ctx, db, &friendships, `SELECT user_low_id, user_high_id FROM friendships WHERE user_low_id = ANY($1::text[]) OR user_high_id = ANY($1::text[])`, authorIDs); err != nil {
 		return nil, err
 	}
 	connections := map[string]int64{}
@@ -247,23 +219,20 @@ func recommendationScores(ctx context.Context, db sqlx.QueryerContext, viewer vi
 		connections[friendship.UserHighID] += int64(viewer.MutualFriends[friendship.UserLowID])
 	}
 
-	query, args, err = sqlx.In(`
+	const engagementsQuery = `
   SELECT r.post_id, r.reactor_id AS user_id FROM realmojis r
   JOIN users u ON u.id = r.reactor_id AND u.status = 'active'
-  WHERE r.post_id IN (?) AND r.replaced_at IS NULL AND r.deleted_at IS NULL
+  WHERE r.post_id = ANY($1::text[]) AND r.replaced_at IS NULL AND r.deleted_at IS NULL
   UNION
   SELECT c.post_id, c.author_id AS user_id FROM comments c
   JOIN users u ON u.id = c.author_id AND u.status = 'active'
-  WHERE c.post_id IN (?) AND c.deleted_at IS NULL
- `, postIDs, postIDs)
-	if err != nil {
-		return nil, err
-	}
+  WHERE c.post_id = ANY($1::text[]) AND c.deleted_at IS NULL
+ `
 	var engagements []struct {
 		PostID string `db:"post_id"`
 		UserID string `db:"user_id"`
 	}
-	if err := sqlx.SelectContext(ctx, db, &engagements, sqlx.Rebind(sqlx.DOLLAR, query), args...); err != nil {
+	if err := sqlx.SelectContext(ctx, db, &engagements, engagementsQuery, postIDs); err != nil {
 		return nil, err
 	}
 	friendEngagements := map[string]int64{}

@@ -113,6 +113,190 @@ func TestNonRankedFeedQueryMatchesGoFilter(t *testing.T) {
 	}
 }
 
+func TestNonRankedFeedQueryTextStableForArrayLengths(t *testing.T) {
+	emptyViewer := viewerContext{User: User{ID: "viewer"}, Friends: map[string]bool{}, FriendsOfFriends: map[string]bool{}, Blocked: map[string]bool{}}
+	populatedViewer := viewerContext{User: User{ID: "viewer"}, Friends: map[string]bool{"friend-1": true}, FriendsOfFriends: map[string]bool{"fof": true}, Blocked: map[string]bool{"blocked": true}}
+	inputTime := ptrTime(time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC))
+	empty := map[string]bool{}
+	populated := map[string]bool{"blocked": true, "friend-1": true, "friend-2": true, "fof": true}
+	for _, feed := range []string{"public", "friends", "following"} {
+		input := getFeedRequest{Feed: feed, BeforePostedAt: inputTime, BeforeID: "post"}
+		queryEmpty, argsEmpty, err := nonRankedFeedQuery(emptyViewer, empty, input, inputTime, "post")
+		if err != nil {
+			t.Fatal(err)
+		}
+		queryPopulated, argsPopulated, err := nonRankedFeedQuery(populatedViewer, populated, input, inputTime, "post")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if queryEmpty != queryPopulated || len(argsEmpty) != len(argsPopulated) {
+			t.Errorf("%s query shape changed with ID cardinality", feed)
+		}
+		for _, args := range [][]any{argsEmpty, argsPopulated} {
+			for _, index := range arrayArgIndexes(feed) {
+				ids, ok := args[index].([]string)
+				if !ok || ids == nil {
+					t.Errorf("%s arg %d is not a non-nil []string: %#v", feed, index, args[index])
+				}
+			}
+		}
+	}
+}
+
+func arrayArgIndexes(feed string) []int {
+	switch feed {
+	case "public":
+		return []int{5}
+	case "friends":
+		return []int{5, 6}
+	case "following":
+		return []int{5, 6, 7, 8}
+	default:
+		return nil
+	}
+}
+
+func TestRecommendationScoresMatchesIN(t *testing.T) {
+	dsn := os.Getenv("T0009_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set T0009_TEST_DSN to run the PostgreSQL recommendation comparison")
+	}
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	conn, err := db.Connx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, statement := range []string{
+		`CREATE TEMP TABLE users (id text PRIMARY KEY, status text NOT NULL)`,
+		`CREATE TEMP TABLE friendships (user_low_id text NOT NULL, user_high_id text NOT NULL)`,
+		`CREATE TEMP TABLE realmojis (post_id text NOT NULL, reactor_id text NOT NULL, replaced_at timestamptz, deleted_at timestamptz)`,
+		`CREATE TEMP TABLE comments (post_id text NOT NULL, author_id text NOT NULL, deleted_at timestamptz)`,
+	} {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, user := range []struct{ id, status string }{
+		{"friend-a", "active"}, {"friend-b", "active"}, {"inactive-friend", "deleted"}, {"stranger", "active"},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO users VALUES ($1,$2)`, user.id, user.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, edge := range [][2]string{
+		{"friend-a", "author-a"}, {"author-a", "common"}, {"author-b", "common"},
+		{"author-b", "friend-b"}, {"author-c", "common"}, {"unrelated-a", "unrelated-b"},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO friendships VALUES ($1,$2)`, edge[0], edge[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, reaction := range []struct {
+		post, user        string
+		replaced, deleted any
+	}{
+		{"post-a", "friend-a", nil, nil}, {"post-a", "friend-b", nil, nil},
+		{"post-a", "inactive-friend", nil, nil}, {"post-a", "friend-a", time.Now(), nil},
+		{"post-a", "friend-b", nil, time.Now()}, {"post-b", "friend-a", nil, nil},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO realmojis VALUES ($1,$2,$3,$4)`, reaction.post, reaction.user, reaction.replaced, reaction.deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, comment := range []struct {
+		post, user string
+		deleted    any
+	}{
+		{"post-a", "friend-a", nil}, {"post-a", "inactive-friend", nil},
+		{"post-b", "friend-b", nil}, {"post-b", "friend-a", time.Now()}, {"post-c", "stranger", nil},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO comments VALUES ($1,$2,$3)`, comment.post, comment.user, comment.deleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	viewer := viewerContext{
+		Friends:       map[string]bool{"friend-a": true, "friend-b": true},
+		MutualFriends: map[string]int{"friend-a": 2, "friend-b": 3, "common": 4},
+	}
+	posts := []PostWithAuthor{
+		{Post: Post{ID: "post-a", AuthorID: "author-a"}},
+		{Post: Post{ID: "post-b", AuthorID: "author-a"}},
+		{Post: Post{ID: "post-c", AuthorID: "author-b"}},
+		{Post: Post{ID: "post-a", AuthorID: "author-a"}},
+	}
+	want, err := recommendationScoresWithIN(ctx, conn, viewer, posts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := recommendationScores(ctx, conn, viewer, posts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ANY scores %v differ from IN scores %v", got, want)
+	}
+}
+
+func recommendationScoresWithIN(ctx context.Context, db sqlx.QueryerContext, viewer viewerContext, posts []PostWithAuthor) (map[string]int64, error) {
+	authorIDs, postIDs := make([]string, 0, len(posts)), make([]string, 0, len(posts))
+	for _, post := range posts {
+		authorIDs = append(authorIDs, post.AuthorID)
+		postIDs = append(postIDs, post.ID)
+	}
+	query, args, err := sqlx.In(`SELECT user_low_id, user_high_id FROM friendships WHERE user_low_id IN (?) OR user_high_id IN (?)`, authorIDs, authorIDs)
+	if err != nil {
+		return nil, err
+	}
+	var friendships []struct {
+		UserLowID  string `db:"user_low_id"`
+		UserHighID string `db:"user_high_id"`
+	}
+	if err := sqlx.SelectContext(ctx, db, &friendships, sqlx.Rebind(sqlx.DOLLAR, query), args...); err != nil {
+		return nil, err
+	}
+	connections := map[string]int64{}
+	for _, friendship := range friendships {
+		connections[friendship.UserLowID] += int64(viewer.MutualFriends[friendship.UserHighID])
+		connections[friendship.UserHighID] += int64(viewer.MutualFriends[friendship.UserLowID])
+	}
+	query, args, err = sqlx.In(`
+  SELECT r.post_id, r.reactor_id AS user_id FROM realmojis r
+  JOIN users u ON u.id = r.reactor_id AND u.status = 'active'
+  WHERE r.post_id IN (?) AND r.replaced_at IS NULL AND r.deleted_at IS NULL
+  UNION
+  SELECT c.post_id, c.author_id AS user_id FROM comments c
+  JOIN users u ON u.id = c.author_id AND u.status = 'active'
+  WHERE c.post_id IN (?) AND c.deleted_at IS NULL
+ `, postIDs, postIDs)
+	if err != nil {
+		return nil, err
+	}
+	var engagements []struct {
+		PostID string `db:"post_id"`
+		UserID string `db:"user_id"`
+	}
+	if err := sqlx.SelectContext(ctx, db, &engagements, sqlx.Rebind(sqlx.DOLLAR, query), args...); err != nil {
+		return nil, err
+	}
+	friendEngagements := map[string]int64{}
+	for _, engagement := range engagements {
+		if viewer.Friends[engagement.UserID] {
+			friendEngagements[engagement.PostID]++
+		}
+	}
+	scores := map[string]int64{}
+	for _, post := range posts {
+		scores[post.ID] = 10*friendEngagements[post.ID] + 3*int64(viewer.MutualFriends[post.AuthorID]) + min(connections[post.AuthorID], 30)
+	}
+	return scores, nil
+}
+
 type testFeedPage struct {
 	IDs     []string
 	HasMore bool
