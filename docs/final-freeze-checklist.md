@@ -8,6 +8,11 @@
 - 直前: `690c937d`（T68b、europe 書込が asia2）#26712 97102 / messages 17。`ff08f40f`（T68、asia POST が america1）#26426 74647 / messages 0。
 - 配置だけ戻す場合: asia1 nginx を `etc-asia1/nginx/isureal.conf`（POST ローカル）に差し替えて reload、asia2 `isureal-go-asia-post` を `disable --now`。
 
+## binary の識別
+
+- `89496093` の純 Go ビルド = sha256 先頭 `8e0ec1b2`（`ldd` に libcrypto なし）。これを最終にする。
+- `9822332d` は OpenSSL（cgo）版 HMAC 試験ビルド。**使わない。**
+
 ## 凍結時点の構成（16:50 に確定）
 
 - asia1: nginx(`etc-asia1/nginx/isureal-asia-post-asia2.conf`、POST /api/posts は asia2:8086) + `isureal-go`(:8080, asia) + `isureal-go-europe`(:8081, europe 書込) + guard
