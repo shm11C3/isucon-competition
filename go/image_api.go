@@ -41,6 +41,22 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 
 		ctx := c.Request().Context()
+		// 発行し得ない期限はHMACを計算せずに不正署名として拒否する。
+		if exp > time.Now().Add(imageURLLifetime+2*imageURLExpiryStep).Unix() {
+			c.Set("abuse", "invalid_signature")
+			return NewAPIError(http.StatusForbidden, "image_forbidden")
+		}
+		// 署名鍵は画像ごとに不変。不正署名はDBへ行かずに拒否する。
+		if known := getKnownImageKey(input.ImageID); known != "" {
+			key, err := imageSigningKey(known)
+			if err != nil {
+				return err
+			}
+			if !hmac.Equal(sig, cachedImageSignature(key, input.ImageID, exp)) {
+				c.Set("abuse", "invalid_signature")
+				return NewAPIError(http.StatusForbidden, "image_forbidden")
+			}
+		}
 		// 公開範囲は毎回確認する。byteaと署名だけキャッシュする。
 		var secretKeyHash string
 		err = h.DB.GetContext(ctx, &secretKeyHash, imageVisibilityQuery, input.ImageID)
@@ -51,6 +67,7 @@ func getImageHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		putKnownImageKey(input.ImageID, secretKeyHash)
 		key, err := imageSigningKey(secretKeyHash)
 		if err != nil {
 			return err

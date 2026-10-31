@@ -74,3 +74,23 @@ func cachedImageSignature(key []byte, imageID string, exp int64) []byte {
 	imageSignatures.Unlock()
 	return sig
 }
+
+var knownImageKeys = struct {
+	sync.RWMutex
+	entries map[string]string
+}{entries: map[string]string{}}
+
+func getKnownImageKey(imageID string) string {
+	knownImageKeys.RLock()
+	defer knownImageKeys.RUnlock()
+	return knownImageKeys.entries[imageID]
+}
+
+func putKnownImageKey(imageID, secretKeyHash string) {
+	knownImageKeys.Lock()
+	defer knownImageKeys.Unlock()
+	if len(knownImageKeys.entries) >= imageSignatureCacheMaxEntries {
+		knownImageKeys.entries = map[string]string{}
+	}
+	knownImageKeys.entries[imageID] = secretKeyHash
+}

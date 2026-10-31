@@ -115,6 +115,22 @@ func loginHandler(h *HandlerContext) echo.HandlerFunc {
 			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
 		}
 		ctx := c.Request().Context()
+		hash := sha256.Sum256([]byte(input.SecretKey))
+		// 認証失敗はロックもトランザクションも取らずに返す。
+		var candidate struct {
+			SecretKeyHash string `db:"secret_key_hash"`
+			Status        string `db:"status"`
+		}
+		err := h.DB.GetContext(ctx, &candidate, `SELECT secret_key_hash, status FROM users WHERE username = $1`, input.Username)
+		if errors.Is(err, sql.ErrNoRows) {
+			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
+		}
+		if err != nil {
+			return err
+		}
+		if candidate.Status != "active" || candidate.SecretKeyHash != hex.EncodeToString(hash[:]) {
+			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
+		}
 		tx, err := h.DB.BeginTxx(ctx, nil)
 		if err != nil {
 			return err
@@ -128,7 +144,6 @@ func loginHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		hash := sha256.Sum256([]byte(input.SecretKey))
 		if user.Status != "active" || user.SecretKeyHash != hex.EncodeToString(hash[:]) {
 			return NewAPIError(http.StatusUnauthorized, "invalid_credentials")
 		}
