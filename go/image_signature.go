@@ -13,7 +13,6 @@ import (
 
 const imageURLLifetime = 24 * time.Hour
 const imageSignatureIterations = 1000
-const imageURLExpiryStep = 5 * time.Minute
 
 func imageSigningKey(secretKeyHash string) ([]byte, error) {
 	key, err := hex.DecodeString(secretKeyHash)
@@ -35,8 +34,7 @@ func imageSignature(key []byte, imageID string, exp int64) []byte {
 }
 
 func signedImageURL(user User, imageID string) string {
-	// Round up so that one image keeps one URL and signature for a short while.
-	exp := time.Now().Add(imageURLLifetime).Truncate(imageURLExpiryStep).Add(imageURLExpiryStep).Unix()
+	exp := time.Now().Add(imageURLLifetime).Unix()
 	query := url.Values{
 		"exp": {strconv.FormatInt(exp, 10)},
 		"sig": {base64.RawURLEncoding.EncodeToString(cachedImageSignature(user.ImageKey, imageID, exp))},
