@@ -23,6 +23,9 @@ type Config struct {
 	ImageCachePeerURL string
 	// ImageCacheResetPeerURLs are the AP base URLs reset by initialize.
 	ImageCacheResetPeerURLs []string
+	// ImagePreload refills the image cache with profile images after a reset;
+	// write-only processes can turn it off (ISUREAL_IMAGE_PRELOAD=0).
+	ImagePreload bool
 	// ApplyBarrier commits writes locally and waits for standby apply before responding.
 	ApplyBarrier bool
 }
@@ -41,6 +44,7 @@ func ConfigFromEnv() *Config {
 		ImageStoreToken:         envOrDefault("ISUREAL_IMAGE_STORE_TOKEN", ""),
 		ImageCachePeerURL:       envOrDefault("ISUREAL_IMAGE_CACHE_PEER_URL", ""),
 		ImageCacheResetPeerURLs: splitURLs(os.Getenv("ISUREAL_CACHE_RESET_PEERS")),
+		ImagePreload:            envOrDefault("ISUREAL_IMAGE_PRELOAD", "1") != "0",
 		ApplyBarrier:            envOrDefault("ISUREAL_APPLY_BARRIER", "1") != "0",
 	}
 }
