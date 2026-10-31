@@ -18,7 +18,7 @@ deploy() {
 		grep -q ISUREAL_LOG_LEVEL ~/env.sh || echo ISUREAL_LOG_LEVEL=info >> ~/env.sh
 		set -- isureal-go
 		if test "$(hostname)" = ip-192-168-1-10; then
-			set -- "$@" isureal-go-europe
+			set -- "$@" isureal-go-europe isureal-go-asia-reads
 		fi
 		sudo systemctl restart "$@"
 		sleep 1

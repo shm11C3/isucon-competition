@@ -27,7 +27,7 @@ const applyBarrierTimeout = 5 * time.Minute
 // applyBarrierSyncStandbys is how many standbys must be in sync state for a
 // barrier commit to prove that every region has applied the writes. It must
 // match the number of standbys listed in synchronous_standby_names.
-var applyBarrierSyncStandbys = envInt("ISUREAL_SYNC_STANDBYS", 2)
+var applyBarrierSyncStandbys = envInt("ISUREAL_SYNC_STANDBYS", 3)
 
 var errApplyBarrierStandbys = errors.New("apply barrier: fewer sync standbys than required")
 var errApplyBarrierNotApplied = errors.New("apply barrier: standbys have not replayed the barrier")
