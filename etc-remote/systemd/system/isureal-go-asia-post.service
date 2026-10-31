@@ -1,0 +1,16 @@
+[Unit]
+Description=isureal-go POST /api/posts for asia users, JPEG decode on an idle host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/go
+EnvironmentFile=/home/isucon/env.sh
+ExecStart=/usr/bin/env GOMEMLIMIT=350MiB ISUREAL_REGION=asia ISUREAL_PORT=8086 ISUREAL_PPROF= ISUREAL_IMAGE_CACHE_PEER_URL= /home/isucon/webapp/go/isureal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
