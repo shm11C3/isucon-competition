@@ -1,7 +1,10 @@
 package isureal
 
 import (
+	"strconv"
 	"sync"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const imageCacheMaxBytes = 128 << 20
@@ -57,7 +60,13 @@ var imageSignatures = struct {
 	entries map[imageSignatureKey][]byte
 }{entries: map[imageSignatureKey][]byte{}}
 
+var imageSignatureFlights singleflight.Group
+
 func cachedImageSignature(key []byte, imageID string, exp int64) []byte {
+	return cachedImageSignatureWith(key, imageID, exp, imageSignature)
+}
+
+func cachedImageSignatureWith(key []byte, imageID string, exp int64, calculate func([]byte, string, int64) []byte) []byte {
 	cacheKey := imageSignatureKey{key: string(key), imageID: imageID, exp: exp}
 	imageSignatures.RLock()
 	sig, ok := imageSignatures.entries[cacheKey]
@@ -65,12 +74,24 @@ func cachedImageSignature(key []byte, imageID string, exp int64) []byte {
 	if ok {
 		return sig
 	}
-	sig = imageSignature(key, imageID, exp)
-	imageSignatures.Lock()
-	if len(imageSignatures.entries) >= imageSignatureCacheMaxEntries {
-		imageSignatures.entries = map[imageSignatureKey][]byte{}
-	}
-	imageSignatures.entries[cacheKey] = sig
-	imageSignatures.Unlock()
-	return sig
+	flightKey := strconv.Itoa(len(cacheKey.key)) + ":" + cacheKey.key + strconv.Itoa(len(cacheKey.imageID)) + ":" + cacheKey.imageID + ":" + strconv.FormatInt(cacheKey.exp, 10)
+	result, _, _ := imageSignatureFlights.Do(flightKey, func() (any, error) {
+		// Another caller may have filled the cache after our first check.
+		imageSignatures.RLock()
+		sig, ok := imageSignatures.entries[cacheKey]
+		imageSignatures.RUnlock()
+		if ok {
+			return sig, nil
+		}
+
+		sig = calculate(key, imageID, exp)
+		imageSignatures.Lock()
+		if len(imageSignatures.entries) >= imageSignatureCacheMaxEntries {
+			imageSignatures.entries = map[imageSignatureKey][]byte{}
+		}
+		imageSignatures.entries[cacheKey] = sig
+		imageSignatures.Unlock()
+		return sig, nil
+	})
+	return result.([]byte)
 }
