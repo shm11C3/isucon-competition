@@ -2,6 +2,7 @@ package isureal
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -20,6 +21,12 @@ import (
 const applyBarrierMaxConcurrent = 8
 const applyBarrierMinInterval = 10 * time.Millisecond
 const applyBarrierTimeout = 5 * time.Minute
+
+// applyBarrierSyncStandbys is how many standbys must be in sync state for a
+// barrier commit to prove that every region has applied the writes.
+const applyBarrierSyncStandbys = 2
+
+var errApplyBarrierStandbys = errors.New("apply barrier: fewer sync standbys than required")
 
 type applyBarrier struct {
 	db        *sqlx.DB
@@ -100,9 +107,20 @@ func (b *applyBarrier) commitBarrier() error {
 	ctx, cancel := context.WithTimeout(context.Background(), applyBarrierTimeout)
 	defer cancel()
 	// A transactional WAL record in an autocommit statement: the session has
-	// synchronous_commit=remote_apply, so this returns once both standbys applied it.
-	_, err := b.db.ExecContext(ctx, `SELECT pg_logical_emit_message(true, 'apply_barrier', '')`)
-	return err
+	// synchronous_commit=remote_apply, so this returns once the sync standbys
+	// applied it. The same statement reports how many standbys are sync so a
+	// misconfigured primary fails closed instead of covering one region only.
+	var syncStandbys int
+	err := b.db.GetContext(ctx, &syncStandbys, `
+  SELECT (SELECT count(*) FROM pg_stat_replication WHERE sync_state = 'sync')
+  FROM pg_logical_emit_message(true, 'apply_barrier', '')`)
+	if err != nil {
+		return err
+	}
+	if syncStandbys < applyBarrierSyncStandbys {
+		return errApplyBarrierStandbys
+	}
+	return nil
 }
 
 type bufferedResponseWriter struct {
@@ -152,8 +170,17 @@ func ApplyBarrierMiddleware(b *applyBarrier) echo.MiddlewareFunc {
 				// Nothing was written (error path): the error handler writes to the real writer.
 				return err
 			}
-			if waitErr := b.Wait(c.Request().Context()); waitErr != nil && c.Request().Context().Err() == nil {
+			if waitErr := b.Wait(c.Request().Context()); waitErr != nil {
+				if c.Request().Context().Err() != nil {
+					return nil // client gone; nothing to send
+				}
+				// Fail closed: the write is committed but not proven applied everywhere.
 				c.Logger().Error("apply barrier failed", "error", waitErr)
+				resp.Status = http.StatusServiceUnavailable
+				real.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+				real.WriteHeader(http.StatusServiceUnavailable)
+				_, writeErr := real.Write([]byte(`{"error":"replica_sync_failed"}` + "\n"))
+				return writeErr
 			}
 			real.WriteHeader(buf.status)
 			if len(buf.body) > 0 {
