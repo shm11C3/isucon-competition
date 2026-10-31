@@ -27,6 +27,7 @@ const applyBarrierTimeout = 5 * time.Minute
 const applyBarrierSyncStandbys = 2
 
 var errApplyBarrierStandbys = errors.New("apply barrier: fewer sync standbys than required")
+var errApplyBarrierNotApplied = errors.New("apply barrier: standbys have not replayed the barrier")
 
 type applyBarrier struct {
 	db        *sqlx.DB
@@ -108,17 +109,31 @@ func (b *applyBarrier) commitBarrier() error {
 	defer cancel()
 	// A transactional WAL record in an autocommit statement: the session has
 	// synchronous_commit=remote_apply, so this returns once the sync standbys
-	// applied it. The same statement reports how many standbys are sync so a
-	// misconfigured primary fails closed instead of covering one region only.
-	var syncStandbys int
-	err := b.db.GetContext(ctx, &syncStandbys, `
-  SELECT (SELECT count(*) FROM pg_stat_replication WHERE sync_state = 'sync')
-  FROM pg_logical_emit_message(true, 'apply_barrier', '')`)
-	if err != nil {
+	// applied it. The statement also returns the record's LSN and how many
+	// standbys are sync, so a misconfigured primary fails closed.
+	var marker struct {
+		LSN          string `db:"lsn"`
+		SyncStandbys int    `db:"sync_standbys"`
+	}
+	if err := b.db.GetContext(ctx, &marker, `
+  SELECT lsn::text AS lsn,
+         (SELECT count(*) FROM pg_stat_replication WHERE sync_state = 'sync') AS sync_standbys
+  FROM pg_logical_emit_message(true, 'apply_barrier', '') AS lsn`); err != nil {
 		return err
 	}
-	if syncStandbys < applyBarrierSyncStandbys {
+	if marker.SyncStandbys < applyBarrierSyncStandbys {
 		return errApplyBarrierStandbys
+	}
+	// A cancelled synchronous-replication wait commits with only a WARNING, so
+	// confirm that every sync standby has replayed past the barrier record.
+	var applied int
+	if err := b.db.GetContext(ctx, &applied, `
+  SELECT count(*) FROM pg_stat_replication
+  WHERE sync_state = 'sync' AND replay_lsn >= $1::pg_lsn`, marker.LSN); err != nil {
+		return err
+	}
+	if applied < applyBarrierSyncStandbys {
+		return errApplyBarrierNotApplied
 	}
 	return nil
 }
@@ -177,6 +192,9 @@ func ApplyBarrierMiddleware(b *applyBarrier) echo.MiddlewareFunc {
 				// Fail closed: the write is committed but not proven applied everywhere.
 				c.Logger().Error("apply barrier failed", "error", waitErr)
 				resp.Status = http.StatusServiceUnavailable
+				for name := range real.Header() {
+					real.Header().Del(name)
+				}
 				real.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 				real.WriteHeader(http.StatusServiceUnavailable)
 				_, writeErr := real.Write([]byte(`{"error":"replica_sync_failed"}` + "\n"))
