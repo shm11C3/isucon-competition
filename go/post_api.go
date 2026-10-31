@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,23 +92,24 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		defer tx.Rollback()
-		var lockedUserID string
-		if err := tx.GetContext(ctx, &lockedUserID, `SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID); err != nil {
+		var user User
+		if err := tx.GetContext(ctx, &user, `SELECT `+strings.Join(userColumns, ", ")+` FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID); err != nil {
 			return err
 		}
-		user, err := getUser(ctx, tx, userID)
-		if err != nil {
+		if err := user.setImageKey(); err != nil {
 			return err
 		}
 		var window struct {
-			ID        string    `db:"id"`
-			LocalDate time.Time `db:"local_date"`
-			StartsAt  time.Time `db:"starts_at"`
+			ID             string     `db:"id"`
+			LocalDate      time.Time  `db:"local_date"`
+			StartsAt       time.Time  `db:"starts_at"`
+			OnTimeDeadline time.Time  `db:"on_time_deadline"`
+			EndedAt        *time.Time `db:"ended_at"`
 		}
 		// Concurrent posts may share the window; closing it must wait for them.
-		err = tx.GetContext(ctx, &window, `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`, user.Region)
+		err = tx.GetContext(ctx, &window, `SELECT id, local_date, starts_at, on_time_deadline, ended_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`, user.Region)
 		if errors.Is(err, sql.ErrNoRows) {
-			err = tx.GetContext(ctx, &window, `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`, user.Region)
+			err = tx.GetContext(ctx, &window, `SELECT id, local_date, starts_at, on_time_deadline, ended_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`, user.Region)
 		}
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -136,18 +138,19 @@ func createPostHandler(h *HandlerContext) echo.HandlerFunc {
 			return err
 		}
 		postID := uuid.NewString()
-		if _, err := tx.ExecContext(ctx, `
+		var post Post
+		if err := tx.GetContext(ctx, &post, `
    INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
                       location_kind, latitude, longitude, locality, posted_at)
    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+   RETURNING id, author_id, posting_window_id, image_id, caption, visibility,
+             location_kind, latitude, longitude, locality, posted_at
   `, postID, userID, window.ID, imageID, input.Caption, input.Visibility,
 			location.Kind, location.Latitude, location.Longitude, location.Locality, postedAt); err != nil {
 			return err
 		}
-		post, err := getPost(ctx, tx, postID)
-		if err != nil {
-			return err
-		}
+		post.OnTimeDeadline = window.OnTimeDeadline
+		post.WindowEndedAt = window.EndedAt
 		if err := tx.Commit(); err != nil {
 			return err
 		}
