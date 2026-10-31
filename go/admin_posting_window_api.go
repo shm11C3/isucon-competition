@@ -48,10 +48,6 @@ func openPostingWindowHandler(h *HandlerContext) echo.HandlerFunc {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(20261031, $1)`, regionLockID); err != nil {
 			return err
 		}
-		// Keep registration and user changes out of the notification snapshot.
-		if _, err := tx.ExecContext(ctx, `LOCK TABLE users IN SHARE MODE`); err != nil {
-			return err
-		}
 		var conflict bool
 		if err := tx.GetContext(ctx, &conflict, `SELECT EXISTS(SELECT 1 FROM posting_windows WHERE region = $1 AND local_date >= $2)`, region, localDate); err != nil {
 			return err
@@ -73,12 +69,8 @@ func openPostingWindowHandler(h *HandlerContext) echo.HandlerFunc {
   `, windowID, region, localDate, startsAt, startsAt.Add(time.Duration(seconds)*time.Second)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
-   INSERT INTO notifications (id, user_id, posting_window_id, created_at)
-   SELECT gen_random_uuid()::text, id, $2, $3 FROM users WHERE region = $1 AND status = 'active'
-  `, region, windowID, startsAt); err != nil {
-			return err
-		}
+		// Notifications are derived from the window and the users that existed
+		// when it opened (see getNotificationsHandler); nothing is fanned out here.
 		window, err := getPostingWindow(ctx, tx, windowID)
 		if err != nil {
 			return err
