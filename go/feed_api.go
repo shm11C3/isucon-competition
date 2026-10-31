@@ -55,6 +55,9 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		if !ranked && !viewer.HasPostedToday {
+			return c.JSON(http.StatusOK, getFeedResponse{Items: []feedItemResponse{}})
+		}
 		following := map[string]bool{}
 		if input.Feed == "following" {
 			var followeeIDs []string
@@ -69,11 +72,20 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 		if ranked {
 			beforePostedAt, beforeID = nil, ""
 		}
-		posts, err := selectPostsWithAuthor(ctx, h.DB, `
+		var posts []PostWithAuthor
+		if ranked {
+			posts, err = selectPostsWithAuthor(ctx, h.DB, `
    AND p.author_id <> $1 AND w.ended_at IS NULL
    AND ($2::timestamptz IS NULL OR (p.posted_at, p.id) < ($2, $3))
    ORDER BY p.posted_at DESC, p.id DESC
   `, viewer.ID, beforePostedAt, beforeID)
+		} else {
+			conditions, args, queryErr := nonRankedFeedQuery(viewer, following, input, beforePostedAt, beforeID)
+			if queryErr != nil {
+				return queryErr
+			}
+			posts, err = selectPostsWithAuthor(ctx, h.DB, conditions, args...)
+		}
 		if err != nil {
 			return err
 		}
@@ -113,6 +125,87 @@ func getFeedHandler(h *HandlerContext) echo.HandlerFunc {
 		}
 		return c.JSON(http.StatusOK, getFeedResponse{Items: items, HasMore: hasMore})
 	}
+}
+
+func nonRankedFeedQuery(viewer viewerContext, following map[string]bool, input getFeedRequest, beforePostedAt *time.Time, beforeID string) (string, []any, error) {
+	conditions := `
+   AND p.author_id <> ? AND w.ended_at IS NULL
+   AND (?::timestamptz IS NULL OR (p.posted_at, p.id) < (?, ?))
+   AND ?
+  `
+	args := []any{viewer.ID, beforePostedAt, beforePostedAt, beforeID, viewer.HasPostedToday}
+	blockedIDs := sortedMapIDs(viewer.Blocked)
+	if len(blockedIDs) > 0 {
+		conditions += ` AND p.author_id NOT IN (?)`
+		args = append(args, blockedIDs)
+	}
+
+	switch input.Feed {
+	case "public":
+		conditions += ` AND p.visibility = 'public'`
+	case "friends":
+		friendIDs := sortedMapIDs(viewer.Friends)
+		if len(friendIDs) == 0 {
+			conditions += ` AND FALSE`
+		} else {
+			conditions += ` AND p.author_id IN (?) AND p.visibility IN ('public', 'friends', 'friends_of_friends')`
+			args = append(args, friendIDs)
+		}
+	case "following":
+		followeeIDs := sortedMapIDs(following)
+		if len(followeeIDs) == 0 {
+			conditions += ` AND FALSE`
+		} else {
+			conditions += ` AND p.author_id IN (?)`
+			args = append(args, followeeIDs)
+			friendIDs := sortedMapIDs(viewer.Friends)
+			fofIDs := sortedMapIDs(unionBoolMaps(viewer.Friends, viewer.FriendsOfFriends))
+			conditions += ` AND (p.visibility = 'public'`
+			if len(friendIDs) > 0 {
+				conditions += ` OR (p.visibility = 'friends' AND p.author_id IN (?))`
+				args = append(args, friendIDs)
+			}
+			if len(fofIDs) > 0 {
+				conditions += ` OR (p.visibility = 'friends_of_friends' AND p.author_id IN (?))`
+				args = append(args, fofIDs)
+			}
+			conditions += `)`
+		}
+	default:
+		conditions += ` AND FALSE`
+	}
+	conditions += ` ORDER BY p.posted_at DESC, p.id DESC LIMIT 51`
+	query, args, err := sqlx.In(conditions, args...)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlx.Rebind(sqlx.DOLLAR, query), args, nil
+}
+
+func sortedMapIDs(values map[string]bool) []string {
+	ids := make([]string, 0, len(values))
+	for id, value := range values {
+		if value {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func unionBoolMaps(first, second map[string]bool) map[string]bool {
+	union := make(map[string]bool, len(first)+len(second))
+	for id, value := range first {
+		if value {
+			union[id] = true
+		}
+	}
+	for id, value := range second {
+		if value {
+			union[id] = true
+		}
+	}
+	return union
 }
 
 func rankedBefore(score int64, post Post, beforeScore int64, beforePostedAt time.Time, beforeID string) bool {
