@@ -12,7 +12,7 @@ EnvironmentFile=/etc/isureal/local-db.env
 Environment=ISUREAL_REGION=asia
 Environment=ISUREAL_PORT=8085
 Environment=ISUREAL_PPROF=127.0.0.1:6065
-ExecStart=/usr/bin/env GOMEMLIMIT=600MiB /home/isucon/webapp/go/isureal
+ExecStart=/usr/bin/env GOMEMLIMIT=350MiB /home/isucon/webapp/go/isureal
 Restart=on-failure
 RestartSec=5
 
