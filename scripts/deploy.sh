@@ -52,6 +52,8 @@ deploy() {
 	if [[ $h == asia1 && $asia1_reads_state == enabled ]]; then
 		asia_reads_unit='set -- "$@" isureal-go-asia-reads'
 	fi
+	# Expand shell variables on the remote host after inserting fixed unit commands.
+	# shellcheck disable=SC2016
 	local remote_script='set -eu
 		cd ~/webapp/go
 		PATH=$HOME/local/go/bin:$PATH go build -o isureal.new cmd/isureal/main.go
