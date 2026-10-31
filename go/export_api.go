@@ -1,6 +1,7 @@
 package isureal
 
 import (
+	"errors"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -28,10 +29,12 @@ func exportPostsHandler(h *HandlerContext) echo.HandlerFunc {
 			ImageData []byte `db:"image_data"`
 		}
 		if err := h.DB.SelectContext(ctx, &posts, `
-   SELECT `+postColumns+`, i.data AS image_data
+   SELECT `+postColumns+`, COALESCE(i.data, ''::bytea) AS image_data
    FROM posts p
    JOIN posting_windows w ON w.id = p.posting_window_id
-   JOIN image_objects i ON i.id = p.image_id
+   LEFT JOIN image_objects i ON i.id = p.image_id
+    AND i.created_at >= p.created_at - interval '1 day'
+    AND i.created_at < p.created_at + interval '1 day'
    WHERE p.author_id = $1 AND p.deleted_at IS NULL
    ORDER BY p.posted_at, p.id
   `, userID); err != nil {
@@ -43,10 +46,22 @@ func exportPostsHandler(h *HandlerContext) echo.HandlerFunc {
 		defer writer.Close()
 		items := make([]exportPostResponse, 0, len(posts))
 		for _, post := range posts {
-			if len(post.ImageData) == 0 && h.ImageStore != nil {
-				data, err := h.ImageStore.Get(ctx, post.ImageID)
-				if err != nil {
-					return err
+			if len(post.ImageData) == 0 {
+				// image_objects is range-partitioned by created_at; the join above
+				// prunes to the post's own month. Bytes that live in the file store
+				// (empty row) or in a partition outside that window are fetched here.
+				var data []byte
+				var err error
+				if h.ImageStore != nil {
+					data, err = h.ImageStore.Get(ctx, post.ImageID)
+					if err != nil && !errors.Is(err, errImageStoreMissing) {
+						return err
+					}
+				}
+				if len(data) == 0 {
+					if err := h.DB.GetContext(ctx, &data, `SELECT data FROM image_objects WHERE id = $1`, post.ImageID); err != nil {
+						return err
+					}
 				}
 				post.ImageData = data
 			}
