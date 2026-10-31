@@ -34,9 +34,14 @@ func imageSignature(key []byte, imageID string, exp int64) []byte {
 	return value
 }
 
+// imageURLExpiry rounds the expiry to the nearest step so that one image keeps
+// one signature for longer.
+func imageURLExpiry(now time.Time) int64 {
+	return now.Add(imageURLLifetime + imageURLExpiryStep/2).Truncate(imageURLExpiryStep).Unix()
+}
+
 func signedImageURL(user User, imageID string) string {
-	// Round to the nearest step so that one image keeps one signature for longer.
-	exp := time.Now().Add(imageURLLifetime + imageURLExpiryStep/2).Truncate(imageURLExpiryStep).Unix()
+	exp := imageURLExpiry(time.Now())
 	query := url.Values{
 		"exp": {strconv.FormatInt(exp, 10)},
 		"sig": {base64.RawURLEncoding.EncodeToString(cachedImageSignature(user.ImageKey, imageID, exp))},
