@@ -4,7 +4,19 @@ BEGIN;
 
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 
-DELETE FROM notifications WHERE created_at > (SELECT created_at FROM initial_data_boundary);
+DO $$
+DECLARE boundary timestamptz := (SELECT created_at FROM initial_data_boundary);
+BEGIN
+  -- Preserve initial notifications if present; the usual empty initial state
+  -- can discard generated notifications without deleting every row/index entry.
+  IF boundary IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM notifications WHERE created_at <= boundary
+  ) THEN
+    TRUNCATE notifications;
+  ELSE
+    DELETE FROM notifications WHERE created_at > boundary;
+  END IF;
+END $$;
 DELETE FROM comments WHERE created_at > (SELECT created_at FROM initial_data_boundary);
 DELETE FROM realmojis WHERE created_at > (SELECT created_at FROM initial_data_boundary);
 DELETE FROM posts WHERE created_at > (SELECT created_at FROM initial_data_boundary);
